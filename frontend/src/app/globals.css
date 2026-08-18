@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* ========================================================== */
+/* CUSTOM SCROLLBAR DISCRETA E ESCURA (SUBSTITUI A BARRA BRANCA) */
+/* ========================================================== */
+::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: #090d16 !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b !important;
+  border-radius: 9999px !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3b82f6 !important;
+}
+
+/* Para navegadores Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b #090d16;
+}
