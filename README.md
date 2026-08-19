@@ -1,4 +1,4 @@
-# Ágape Audit
+# Auditoria Ágape
 
 Ferramenta interna da Prover para auditar o atendimento do **Ágape**, o agente de IA que responde clientes via WhatsApp através da [Umbler UTalk](https://www.umbler.com/br/utalk). Permite revisar cada resposta do Ágape individualmente (não só a conversa inteira), classificar por tópico/subtópico, sinalizar falhas na base de conhecimento, gerar pares de pergunta/resposta para retreinar o agente, e acompanhar tudo isso em relatórios.
 
