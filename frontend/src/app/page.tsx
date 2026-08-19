@@ -2,14 +2,15 @@
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { 
-  Star, MessageSquare, BookOpen, Send, Filter, 
-  RefreshCw, Clock, Search, Sparkles, Bot, UserCheck, 
-  CheckSquare, Square, X, ShieldCheck, Activity, BrainCircuit
+import Link from 'next/link';
+import {
+  Star, MessageSquare, BookOpen, Send,
+  RefreshCw, Clock, Search, Sparkles, Bot, UserCheck,
+  CheckSquare, X, ShieldCheck, Activity, BrainCircuit,
+  Tag, Plus, Trash2, Pencil, ArrowLeft, BarChart3, Settings, ClipboardCheck
 } from 'lucide-react';
 
 const API_URL = 'http://localhost:3001/api';
-const CARTEIRAS = ['TODAS', 'ANTARES', 'ARCTURUS', 'ALPHA', 'SIGMA', 'SIRIUS'];
 
 function getTagBadge(tagName: string) {
   const name = (tagName || '').trim().toUpperCase();
@@ -74,6 +75,31 @@ function formatDateTime(rawDate?: any): { dateStr: string; timeStr: string } {
   }
 }
 
+// Tempo relativo tipo Umbler ("há 5 min", "há 2 h", "há 3 dias")
+function formatRelativeTime(rawDate?: any): string {
+  if (!rawDate) return '';
+  const d = new Date(rawDate);
+  if (isNaN(d.getTime())) return '';
+
+  const diffMs = Date.now() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+
+  if (diffMin < 1) return 'agora';
+  if (diffMin < 60) return `há ${diffMin} min`;
+
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `há ${diffH} h`;
+
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 30) return `há ${diffD} dia${diffD > 1 ? 's' : ''}`;
+
+  const diffMonths = Math.floor(diffD / 30);
+  if (diffMonths < 12) return `há ${diffMonths} ${diffMonths > 1 ? 'meses' : 'mês'}`;
+
+  const diffYears = Math.floor(diffMonths / 12);
+  return `há ${diffYears} ano${diffYears > 1 ? 's' : ''}`;
+}
+
 function renderMessageContent(msg: any): string {
   if (!msg) return 'Sem mensagem';
   
@@ -128,13 +154,13 @@ export default function AuditDashboard() {
   const [allChats, setAllChats] = useState<any[]>([]);
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [totalChats, setTotalChats] = useState(0);
-  const [selectedCarteira, setSelectedCarteira] = useState('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // FIX: Padrão ativado para Apenas Ágape
-  const [onlyAgape, setOnlyAgape] = useState(true); 
-  // FIX: Status Padrão na Entrada
-  const [statusTab, setStatusTab] = useState('entrada');
+
+  // Atendente selecionado (padrão: Ágape, assim que a config carregar)
+  const [attendants, setAttendants] = useState<any[]>([]);
+  const [selectedAttendantId, setSelectedAttendantId] = useState('');
+  // Padrão em Finalizados: para auditoria, faz mais sentido ver conversas já concluídas do Ágape
+  const [statusTab, setStatusTab] = useState('finalizados');
 
   const [selectedChat, setSelectedChat] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -147,19 +173,71 @@ export default function AuditDashboard() {
   const [kbFail, setKbFail] = useState(false);
   const [feedback, setFeedback] = useState('');
   
-  // Form de Treinamento
-  const [trainAi, setTrainAi] = useState(false);
-  const [qaQuestion, setQaQuestion] = useState('');
-  const [qaAnswer, setQaAnswer] = useState('');
+  // ID do membro Ágape na Umbler (vem do backend, evita duplicar a constante)
+  const [agapeMemberId, setAgapeMemberId] = useState<string | null>(null);
+
+  // Tópicos/Subtópicos (pra classificar auditorias por resposta)
+  const [topics, setTopics] = useState<any[]>([]);
+  const [showTopicsManager, setShowTopicsManager] = useState(false);
+  const [newTopicName, setNewTopicName] = useState('');
+  const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
+  const [editingTopicName, setEditingTopicName] = useState('');
+  const [addingSubtopicTo, setAddingSubtopicTo] = useState<string | null>(null);
+  const [newSubtopicName, setNewSubtopicName] = useState('');
+  const [editingSubtopicId, setEditingSubtopicId] = useState<string | null>(null);
+  const [editingSubtopicName, setEditingSubtopicName] = useState('');
+
+  // Auditorias por resposta do chat aberto (messageId -> audit)
+  const [messageAudits, setMessageAudits] = useState<Record<string, any>>({});
+  const [selectedMessage, setSelectedMessage] = useState<any>(null);
+  // Painel direito só abre quando o usuário pede (botão "Avaliar Atendimento" ou clique numa resposta)
+  const [rightPanelMode, setRightPanelMode] = useState<'none' | 'chat' | 'message'>('none');
+
+  // Form de auditoria por resposta
+  const [msgTopicId, setMsgTopicId] = useState('');
+  const [msgSubtopicId, setMsgSubtopicId] = useState('');
+  const [msgViolatedRules, setMsgViolatedRules] = useState(false);
+  const [msgKbFail, setMsgKbFail] = useState(false);
+  const [msgFeedback, setMsgFeedback] = useState('');
+  const [msgClientQuestion, setMsgClientQuestion] = useState('');
+  const [msgTrainAi, setMsgTrainAi] = useState(false);
+  const [msgQaQuestion, setMsgQaQuestion] = useState('');
+  const [msgQaAnswer, setMsgQaAnswer] = useState('');
+
+  const fetchConfig = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/config`);
+      setAgapeMemberId(res.data?.agapeMemberId || null);
+      setAttendants(res.data?.attendants || []);
+      setSelectedAttendantId(res.data?.agapeMemberId || 'TODOS');
+    } catch (err) {
+      console.error('Erro ao buscar config:', err);
+    }
+  };
+
+  const fetchTopics = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/topics`);
+      setTopics(res.data || []);
+    } catch (err) {
+      console.error('Erro ao buscar tópicos:', err);
+    }
+  };
+
+  useEffect(() => {
+    document.title = 'Auditoria Ágape';
+    fetchConfig();
+    fetchTopics();
+  }, []);
 
   const fetchChats = async (isBackground = false) => {
+    if (!selectedAttendantId) return; // espera a config carregar (default: Ágape)
     if (!isBackground) setLoading(true);
     try {
       const res = await axios.get(`${API_URL}/chats`, {
         params: {
-          carteira: selectedCarteira,
           search: searchTerm,
-          onlyAgape: onlyAgape ? 'true' : 'false',
+          attendantId: selectedAttendantId,
           status: statusTab
         }
       });
@@ -178,7 +256,7 @@ export default function AuditDashboard() {
       fetchChats(true);
     }, 15000);
     return () => clearInterval(interval);
-  }, [selectedCarteira, searchTerm, onlyAgape, statusTab]);
+  }, [searchTerm, selectedAttendantId, statusTab]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -192,20 +270,28 @@ export default function AuditDashboard() {
   const handleSelectChat = async (chat: any) => {
     console.log("🔍 1. Chat clicado (Resumo):", chat);
     setSelectedChat(chat);
+    setSelectedMessage(null);
+    setRightPanelMode('none');
     setLoadingMessages(true);
-    
+
     if (chat.audit) {
       setRating(chat.audit.rating || 5);
       setViolatedRules(Boolean(chat.audit.violatedPromptRules));
       setKbFail(Boolean(chat.audit.knowledgeBaseFail));
       setFeedback(chat.audit.auditorFeedback || '');
-      setTrainAi(false);
     } else {
       setRating(5);
       setViolatedRules(false);
       setKbFail(false);
       setFeedback('');
-      setTrainAi(false);
+    }
+
+    try {
+      const auditsRes = await axios.get(`${API_URL}/chats/${chat.id}/message-audits`);
+      setMessageAudits(auditsRes.data || {});
+    } catch (err) {
+      console.error('Erro ao buscar auditorias por resposta:', err);
+      setMessageAudits({});
     }
 
     console.log("📦 2. Mensagens que o Backend conseguiu guardar em cache:", chat.cachedMessages);
@@ -259,17 +345,118 @@ export default function AuditDashboard() {
         violatedPromptRules: violatedRules,
         knowledgeBaseFail: kbFail,
         auditorFeedback: feedback,
-        trainAi,
-        qaQuestion,
-        qaAnswer,
         auditorEmail: 'auditor@prover.com.br',
       });
 
-      alert('✅ Auditoria salva com sucesso!');
+      alert('✅ Auditoria geral do chat salva com sucesso!');
       fetchChats(true);
     } catch (err) {
       alert('❌ Erro ao salvar auditoria');
     }
+  };
+
+  // Acha a pergunta do cliente imediatamente antes de uma resposta, pra pré-preencher o contexto
+  const findPrecedingClientQuestion = (index: number) => {
+    for (let i = index - 1; i >= 0; i--) {
+      if (messages[i]?.source === 'Contact') {
+        return renderMessageContent(messages[i]);
+      }
+    }
+    return '';
+  };
+
+  const handleSelectMessage = (msg: any, index: number) => {
+    setSelectedMessage(msg);
+    setRightPanelMode('message');
+    const existing = messageAudits[msg.id];
+    if (existing) {
+      setMsgTopicId(existing.topicId || '');
+      setMsgSubtopicId(existing.subtopicId || '');
+      setMsgViolatedRules(Boolean(existing.violatedPromptRules));
+      setMsgKbFail(Boolean(existing.knowledgeBaseFail));
+      setMsgFeedback(existing.auditorFeedback || '');
+      setMsgClientQuestion(existing.clientQuestion || '');
+    } else {
+      setMsgTopicId('');
+      setMsgSubtopicId('');
+      setMsgViolatedRules(false);
+      setMsgKbFail(false);
+      setMsgFeedback('');
+      setMsgClientQuestion(findPrecedingClientQuestion(index));
+    }
+    setMsgTrainAi(false);
+    setMsgQaQuestion('');
+    setMsgQaAnswer('');
+  };
+
+  const handleSaveMessageAudit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedChat || !selectedMessage) return;
+
+    try {
+      await axios.post(`${API_URL}/message-audits`, {
+        chatId: selectedChat.id,
+        messageId: selectedMessage.id,
+        clientQuestion: msgClientQuestion,
+        topicId: msgTopicId || null,
+        subtopicId: msgSubtopicId || null,
+        violatedPromptRules: msgViolatedRules,
+        knowledgeBaseFail: msgKbFail,
+        auditorFeedback: msgFeedback,
+        trainAi: msgTrainAi,
+        qaQuestion: msgQaQuestion,
+        qaAnswer: msgQaAnswer,
+        auditorEmail: 'auditor@prover.com.br',
+      });
+
+      const auditsRes = await axios.get(`${API_URL}/chats/${selectedChat.id}/message-audits`);
+      setMessageAudits(auditsRes.data || {});
+      alert('✅ Resposta auditada com sucesso!');
+      setSelectedMessage(null);
+    } catch (err) {
+      alert('❌ Erro ao salvar auditoria da resposta');
+    }
+  };
+
+  const handleAddTopic = async () => {
+    if (!newTopicName.trim()) return;
+    await axios.post(`${API_URL}/topics`, { name: newTopicName.trim() });
+    setNewTopicName('');
+    fetchTopics();
+  };
+
+  const handleRenameTopic = async (id: string) => {
+    if (!editingTopicName.trim()) return;
+    await axios.put(`${API_URL}/topics/${id}`, { name: editingTopicName.trim() });
+    setEditingTopicId(null);
+    fetchTopics();
+  };
+
+  const handleDeleteTopic = async (id: string) => {
+    if (!confirm('Excluir este tópico e seus subtópicos?')) return;
+    await axios.delete(`${API_URL}/topics/${id}`);
+    fetchTopics();
+  };
+
+  const handleAddSubtopic = async (topicId: string) => {
+    if (!newSubtopicName.trim()) return;
+    await axios.post(`${API_URL}/topics/${topicId}/subtopics`, { name: newSubtopicName.trim() });
+    setNewSubtopicName('');
+    setAddingSubtopicTo(null);
+    fetchTopics();
+  };
+
+  const handleRenameSubtopic = async (id: string) => {
+    if (!editingSubtopicName.trim()) return;
+    await axios.put(`${API_URL}/subtopics/${id}`, { name: editingSubtopicName.trim() });
+    setEditingSubtopicId(null);
+    fetchTopics();
+  };
+
+  const handleDeleteSubtopic = async (id: string) => {
+    if (!confirm('Excluir este subtópico?')) return;
+    await axios.delete(`${API_URL}/subtopics/${id}`);
+    fetchTopics();
   };
 
   const visibleChats = allChats.slice(0, displayedCount);
@@ -283,12 +470,27 @@ export default function AuditDashboard() {
         <div className="p-4 border-b border-slate-800/80 space-y-3 bg-slate-900/40">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold text-blue-400 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-blue-500 fill-blue-500/20" /> 
-              Ágape Audit
+              <Sparkles className="w-5 h-5 text-blue-500 fill-blue-500/20" />
+              Auditoria Ágape
             </h1>
             <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2.5 py-0.5 rounded-full font-mono font-medium">
               {visibleChats.length} de {totalChats} chats
             </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/relatorios"
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-medium text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all"
+            >
+              <BarChart3 className="w-3.5 h-3.5" /> Relatórios
+            </Link>
+            <button
+              onClick={() => setShowTopicsManager(true)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-medium text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" /> Temas
+            </button>
           </div>
 
           {/* Abas (Apenas Entrada, Esperando e Finalizados) */}
@@ -312,31 +514,17 @@ export default function AuditDashboard() {
             ))}
           </div>
           
-          <button
-            onClick={() => setOnlyAgape(!onlyAgape)}
-            className={`w-full flex items-center justify-between p-2 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
-              onlyAgape 
-                ? 'bg-blue-600/20 border-blue-500/40 text-blue-300' 
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-blue-400" />
-              Apenas Atendimentos do Ágape
-            </span>
-            {onlyAgape ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4" />}
-          </button>
-
-          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 focus-within:border-blue-500 transition-all">
-            <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <div className="flex items-center gap-2 bg-blue-600/10 border border-blue-500/30 rounded-xl px-2.5 py-1.5 focus-within:border-blue-500 transition-all">
+            <Bot className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <select
-              value={selectedCarteira}
-              onChange={(e) => setSelectedCarteira(e.target.value)}
-              className="w-full bg-transparent text-xs font-medium text-slate-200 outline-none cursor-pointer"
+              value={selectedAttendantId}
+              onChange={(e) => setSelectedAttendantId(e.target.value)}
+              className="w-full bg-transparent text-xs font-medium text-blue-300 outline-none cursor-pointer"
             >
-              {CARTEIRAS.map((c) => (
-                <option key={c} value={c} className="bg-slate-900 text-slate-200">
-                  Carteira: {c}
+              <option value="TODOS" className="bg-slate-900 text-slate-200">Todos atendentes</option>
+              {attendants.map((a) => (
+                <option key={a.id} value={a.id} className="bg-slate-900 text-slate-200">
+                  {a.name}
                 </option>
               ))}
             </select>
@@ -373,6 +561,7 @@ export default function AuditDashboard() {
           ) : (
             visibleChats.map((chat) => {
               const { dateStr, timeStr } = formatDateTime(chat.updatedAt);
+              const relativeTime = formatRelativeTime(chat.updatedAt);
               const carteiraBadge = getTagBadge(chat.carteiraTag);
 
               return (
@@ -386,8 +575,17 @@ export default function AuditDashboard() {
                   }`}
                 >
                   <div className="flex justify-between items-start mb-1.5 gap-2">
-                    <span className="font-semibold text-slate-200 text-xs truncate max-w-[160px]">
-                      {chat.contactName}
+                    <span className="flex items-center gap-2 min-w-0">
+                      {chat.contactPhoto ? (
+                        <img src={chat.contactPhoto} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <span className="w-6 h-6 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-[10px] shrink-0">
+                          {chat.contactName?.charAt(0)?.toUpperCase() || 'C'}
+                        </span>
+                      )}
+                      <span className="font-semibold text-slate-200 text-xs truncate">
+                        {chat.contactName}
+                      </span>
                     </span>
                     <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 uppercase shrink-0 ${carteiraBadge.style}`}>
                       {carteiraBadge.icon} {chat.carteiraTag}
@@ -399,19 +597,14 @@ export default function AuditDashboard() {
                   </p>
 
                   <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
-                    <span className="flex items-center gap-1 text-slate-400">
+                    <span className="flex items-center gap-1 text-slate-400" title={`${dateStr} ${timeStr ? `às ${timeStr}` : ''}`}>
                       <Clock className="w-3 h-3 text-slate-500" />
-                      {/* O SEU RENDERIZADOR PERFEITO: */}
-                      {dateStr} {timeStr ? `às ${timeStr}` : ''}
+                      {relativeTime}
                     </span>
 
-                    {chat.audit ? (
+                    {chat.audit && (
                       <span className="flex items-center text-emerald-400 font-semibold gap-0.5 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
                         <Star className="w-2.5 h-2.5 fill-emerald-400" /> {chat.audit.rating}★
-                      </span>
-                    ) : (
-                      <span className="text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded font-medium">
-                        Pendente
                       </span>
                     )}
                   </div>
@@ -428,10 +621,14 @@ export default function AuditDashboard() {
           <>
             <div className="p-4 border-b border-slate-800/80 bg-slate-950/90 flex justify-between items-center backdrop-blur-md">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-sm shadow-inner">
-                  {selectedChat.contactName?.charAt(0)?.toUpperCase() || 'C'}
-                </div>
-                
+                {selectedChat.contactPhoto ? (
+                  <img src={selectedChat.contactPhoto} alt="" className="w-10 h-10 rounded-full object-cover border border-blue-500/30 shadow-inner" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-sm shadow-inner">
+                    {selectedChat.contactName?.charAt(0)?.toUpperCase() || 'C'}
+                  </div>
+                )}
+
                 <div>
                   <h2 className="font-bold text-sm text-slate-100 flex items-center gap-2">
                     {selectedChat.contactName}
@@ -453,6 +650,19 @@ export default function AuditDashboard() {
                   </div>
                 </div>
               </div>
+
+              <button
+                onClick={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
+                title="Avaliar o atendimento como um todo (nota geral + observação)"
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                  selectedChat.audit
+                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
+                }`}
+              >
+                <Star className={`w-4 h-4 ${selectedChat.audit ? 'fill-emerald-400' : ''}`} />
+                {selectedChat.audit ? `Avaliado ${selectedChat.audit.rating}★` : 'Avaliar Atendimento'}
+              </button>
             </div>
 
             <div className="flex-1 p-5 overflow-y-auto space-y-4 bg-slate-900/30 custom-scrollbar">
@@ -471,37 +681,83 @@ export default function AuditDashboard() {
                 </div>
               ) : (
                 messages.map((m: any, i: number) => {
-                  const isBot = m.fromType === 'Bot' || m.fromName === 'Ágape' || m.botInstanceId || m.aiAgentId || m.sentByOrganizationMember === false;
+                  const isFromContact = m.source === 'Contact';
+                  const isFromAgape = Boolean(agapeMemberId) && m.sentByOrganizationMember?.id === agapeMemberId;
+                  const isFromBotFlow = m.source === 'Bot' && !isFromAgape;
+                  const isAttendant = !isFromContact; // cliente à esquerda, atendimento (Ágape/fluxo/humano) à direita
                   const rawTime = m.createdAtUTC || m.createdAt || m.dateUTC || m.date || m.eventAtUTC;
                   const { dateStr, timeStr } = formatDateTime(rawTime);
+                  const audited = messageAudits[m.id];
+                  const isSelected = selectedMessage?.id === m.id;
+
+                  let label = '';
+                  if (isFromAgape) label = '🤖 Ágape (IA)';
+                  else if (isFromBotFlow) label = `⚙️ ${m.botInstance?.botName || 'Fluxo automático'}`;
+                  else if (isAttendant) label = `🧑‍💼 ${(m.prefix || 'Atendente').replace(/\*/g, '').replace(/:$/, '')}`;
+
+                  const avatar = isFromAgape || isFromBotFlow ? (
+                    <img src="/agape.png" alt="Ágape" className="w-7 h-7 rounded-full object-cover border border-blue-300/50 shrink-0" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0">
+                      <UserCheck className="w-3.5 h-3.5" />
+                    </div>
+                  );
 
                   return (
                     <div
                       key={i}
-                      className={`flex flex-col ${isBot ? 'items-start' : 'items-end'}`}
+                      className={`flex items-start gap-2 ${isFromContact ? 'justify-start' : 'justify-end'}`}
                     >
-                      <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-sm relative group ${
-                          isBot
-                            ? 'bg-slate-800/90 text-slate-100 rounded-tl-none border border-slate-700/80'
-                            : 'bg-blue-600 text-white rounded-tr-none'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center gap-4 mb-1.5 border-b border-white/10 pb-1">
-                          <span className={`text-[10px] font-bold flex items-center gap-1 ${isBot ? 'text-blue-400' : 'text-blue-100'}`}>
-                            {isBot ? <Bot className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
-                            {isBot ? '🤖 Ágape (IA)' : '👤 Cliente'}
-                          </span>
-                          
-                          <span className="text-[9px] opacity-75 font-mono text-slate-300">
+                      {isFromContact && (
+                        <div
+                          className="max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-sm relative group bg-slate-800 text-slate-300 rounded-tl-none"
+                        >
+                          <p className="whitespace-pre-wrap leading-relaxed">{renderMessageContent(m)}</p>
+                          <span className="block text-right text-[9px] opacity-60 font-mono mt-1">
                             {dateStr} {timeStr && `às ${timeStr}`}
                           </span>
                         </div>
+                      )}
+                      {isAttendant && (
+                        <>
+                          <div
+                            onClick={() => isFromAgape && handleSelectMessage(m, i)}
+                            className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs shadow-sm relative group bg-blue-500 text-white rounded-tr-none shadow-md shadow-blue-500/20 ${
+                              isFromAgape ? 'cursor-pointer hover:brightness-110' : ''
+                            } ${isSelected ? 'ring-2 ring-blue-300' : ''}`}
+                          >
+                            <div className="flex justify-between items-center gap-4 mb-1.5 border-b border-white/10 pb-1">
+                              <span className="text-[10px] font-bold flex items-center gap-1 text-blue-50">
+                                {label}
+                              </span>
 
-                        <p className="whitespace-pre-wrap leading-relaxed">
+                              <span className="text-[9px] opacity-75 font-mono text-blue-100">
+                                {dateStr} {timeStr && `às ${timeStr}`}
+                              </span>
+                            </div>
+
+                            <p className="whitespace-pre-wrap leading-relaxed">
   {renderMessageContent(m)}
 </p>
-                      </div>
+
+                            {isFromAgape && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleSelectMessage(m, i); }}
+                                className={`mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                                  audited
+                                    ? 'bg-emerald-500 text-white hover:bg-emerald-400'
+                                    : 'bg-white/15 text-white border border-white/30 hover:bg-white/25'
+                                }`}
+                              >
+                                <ClipboardCheck className="w-3.5 h-3.5" />
+                                {audited ? 'Auditado · editar' : 'Auditar esta resposta'}
+                              </button>
+                            )}
+                          </div>
+                          {avatar}
+                        </>
+                      )}
                     </div>
                   );
                 })
@@ -536,17 +792,158 @@ export default function AuditDashboard() {
         )}
       </div>
 
-      {/* 3. PAINEL DIREITO: Form de Auditoria */}
-      {selectedChat && (
+      {/* 3. PAINEL DIREITO: Form de Auditoria (geral do chat OU de uma resposta específica) */}
+      {selectedChat && rightPanelMode === 'message' && selectedMessage && (
         <div className="w-80 lg:w-96 bg-slate-950 p-5 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar">
-          
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
+            <h3 className="text-sm font-bold flex items-center gap-2 text-slate-200">
+              <ClipboardCheck className="w-4 h-4 text-blue-400" /> Auditoria da Resposta
+            </h3>
+            <button
+              onClick={() => { setSelectedMessage(null); setRightPanelMode('none'); }}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
+              title="Fechar"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSaveMessageAudit} className="space-y-4">
+            <div className="bg-slate-900/60 border border-slate-800/60 rounded-lg p-2.5 text-[11px] text-slate-400 leading-relaxed">
+              <span className="font-semibold text-slate-300">Resposta do Ágape:</span> {renderMessageContent(selectedMessage).slice(0, 180)}
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">Pergunta do cliente (contexto)</label>
+              <input
+                type="text"
+                value={msgClientQuestion}
+                onChange={(e) => setMsgClientQuestion(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Tópico</label>
+                <select
+                  value={msgTopicId}
+                  onChange={(e) => { setMsgTopicId(e.target.value); setMsgSubtopicId(''); }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
+                >
+                  <option value="">Selecione...</option>
+                  {topics.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Subtópico</label>
+                <select
+                  value={msgSubtopicId}
+                  onChange={(e) => setMsgSubtopicId(e.target.value)}
+                  disabled={!msgTopicId}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-40"
+                >
+                  <option value="">-</option>
+                  {(topics.find((t) => t.id === msgTopicId)?.subtopics || []).map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-slate-800/80">
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300 bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60 hover:border-slate-700 transition-all">
+                <input
+                  type="checkbox"
+                  checked={msgViolatedRules}
+                  onChange={(e) => setMsgViolatedRules(e.target.checked)}
+                  className="rounded bg-slate-800 border-slate-700 text-blue-600 mt-0.5"
+                />
+                <span className="leading-tight">Violou diretrizes? (ex: usou listas/menus, se reapresentou)</span>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300 bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60 hover:border-slate-700 transition-all">
+                <input
+                  type="checkbox"
+                  checked={msgKbFail}
+                  onChange={(e) => setMsgKbFail(e.target.checked)}
+                  className="rounded bg-slate-800 border-slate-700 text-blue-600 mt-0.5"
+                />
+                <span className="leading-tight">Resposta Incorreta / Falta na Base</span>
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">Observações do Auditor</label>
+              <textarea
+                value={msgFeedback}
+                onChange={(e) => setMsgFeedback(e.target.value)}
+                rows={3}
+                placeholder="Ex: A resposta ignorou o horário mencionado pelo cliente..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-blue-500/80 transition-all placeholder-slate-600 custom-scrollbar"
+              />
+            </div>
+
+            <div className="pt-3 border-t border-slate-800/80">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-blue-400 mb-2.5">
+                <input
+                  type="checkbox"
+                  checked={msgTrainAi}
+                  onChange={(e) => setMsgTrainAi(e.target.checked)}
+                  className="rounded bg-slate-800 border-slate-700 text-blue-600"
+                />
+                <RefreshCw className="w-3.5 h-3.5" /> Enviar Q&A para Treinar o Ágape
+              </label>
+
+              {msgTrainAi && (
+                <div className="space-y-2.5 bg-slate-900/80 p-3 rounded-xl border border-slate-800/80">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Pergunta do Cliente</label>
+                    <input
+                      type="text"
+                      value={msgQaQuestion}
+                      onChange={(e) => setMsgQaQuestion(e.target.value)}
+                      placeholder="Ex: Como faço para emitir carteirinha?"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Resposta Ideal Esperada</label>
+                    <textarea
+                      value={msgQaAnswer}
+                      onChange={(e) => setMsgQaAnswer(e.target.value)}
+                      rows={2}
+                      placeholder="Ex: Acesse Cadastros > Carteirinhas..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500 custom-scrollbar"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+            >
+              <Send className="w-3.5 h-3.5" /> Salvar Auditoria da Resposta
+            </button>
+          </form>
+        </div>
+      )}
+
+      {selectedChat && rightPanelMode === 'chat' && (
+        <div className="w-80 lg:w-96 bg-slate-950 p-5 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar">
+
           <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800/80">
             <h3 className="text-sm font-bold flex items-center gap-2 text-slate-200">
               <BookOpen className="w-4 h-4 text-blue-400" /> Auditoria do Atendimento
             </h3>
 
             <button
-              onClick={() => setSelectedChat(null)}
+              onClick={() => setRightPanelMode('none')}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
               title="Fechar painel de auditoria"
             >
@@ -554,10 +951,14 @@ export default function AuditDashboard() {
             </button>
           </div>
 
+          <p className="text-[11px] text-slate-500 mb-4 leading-relaxed">
+            Nota geral do atendimento. Pra auditar respostas específicas do Ágape em detalhe (tópico, falha na base, treino), clique na bolha da resposta na conversa.
+          </p>
+
           <form onSubmit={handleSaveAudit} className="space-y-4">
             <div>
               <label className="block text-[11px] font-medium text-slate-400 mb-1.5">
-                Classificação da Resposta da IA
+                Classificação Geral do Atendimento
               </label>
               <div className="flex gap-1.5 bg-slate-900/80 p-2 rounded-xl border border-slate-800/80 justify-around">
                 {[1, 2, 3, 4, 5].map((star) => (
@@ -585,7 +986,7 @@ export default function AuditDashboard() {
                   onChange={(e) => setViolatedRules(e.target.checked)}
                   className="rounded bg-slate-800 border-slate-700 text-blue-600 mt-0.5"
                 />
-                <span className="leading-tight">Violou diretrizes? (ex: usou listas/menus, se reapresentou)</span>
+                <span className="leading-tight">Violou diretrizes em algum momento do atendimento?</span>
               </label>
 
               <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-300 bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60 hover:border-slate-700 transition-all">
@@ -595,68 +996,151 @@ export default function AuditDashboard() {
                   onChange={(e) => setKbFail(e.target.checked)}
                   className="rounded bg-slate-800 border-slate-700 text-blue-600 mt-0.5"
                 />
-                <span className="leading-tight">Resposta Incorreta / Falta na Base</span>
+                <span className="leading-tight">Teve resposta incorreta / falta na base em algum momento?</span>
               </label>
             </div>
 
             <div>
               <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                Observações do Auditor
+                Observações Gerais do Auditor
               </label>
               <textarea
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
                 rows={3}
-                placeholder="Ex: A IA se reapresentou no meio da conversa..."
+                placeholder="Resumo do atendimento como um todo..."
                 className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-blue-500/80 transition-all placeholder-slate-600 custom-scrollbar"
               />
-            </div>
-
-            <div className="pt-3 border-t border-slate-800/80">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-blue-400 mb-2.5">
-                <input
-                  type="checkbox"
-                  checked={trainAi}
-                  onChange={(e) => setTrainAi(e.target.checked)}
-                  className="rounded bg-slate-800 border-slate-700 text-blue-600"
-                />
-                <RefreshCw className="w-3.5 h-3.5" /> Enviar Q&A para Treinar o Ágape
-              </label>
-
-              {trainAi && (
-                <div className="space-y-2.5 bg-slate-900/80 p-3 rounded-xl border border-slate-800/80">
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-1">Pergunta do Cliente</label>
-                    <input
-                      type="text"
-                      value={qaQuestion}
-                      onChange={(e) => setQaQuestion(e.target.value)}
-                      placeholder="Ex: Como faço para emitir carteirinha?"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-1">Resposta Ideal Esperada</label>
-                    <textarea
-                      value={qaAnswer}
-                      onChange={(e) => setQaAnswer(e.target.value)}
-                      rows={2}
-                      placeholder="Ex: Acesse Cadastros > Carteirinhas..."
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500 custom-scrollbar"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
 
             <button
               type="submit"
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
             >
-              <Send className="w-3.5 h-3.5" /> Salvar Auditoria
+              <Send className="w-3.5 h-3.5" /> Salvar Auditoria Geral
             </button>
           </form>
+        </div>
+      )}
+
+      {showTopicsManager && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-slate-950 border border-slate-800 rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-slate-200">
+                <Tag className="w-4 h-4 text-blue-400" /> Tópicos e Subtópicos
+              </h3>
+              <button
+                onClick={() => setShowTopicsManager(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              {topics.map((t) => (
+                <div key={t.id} className="bg-slate-900/60 border border-slate-800/60 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    {editingTopicId === t.id ? (
+                      <input
+                        autoFocus
+                        value={editingTopicName}
+                        onChange={(e) => setEditingTopicName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleRenameTopic(t.id)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded p-1.5 text-xs text-slate-200 outline-none focus:border-blue-500"
+                      />
+                    ) : (
+                      <span className="text-xs font-semibold text-slate-200">{t.name}</span>
+                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {editingTopicId === t.id ? (
+                        <button onClick={() => handleRenameTopic(t.id)} className="p-1 text-emerald-400 hover:bg-slate-800 rounded cursor-pointer">
+                          <CheckSquare className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <button onClick={() => { setEditingTopicId(t.id); setEditingTopicName(t.name); }} className="p-1 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded cursor-pointer">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded cursor-pointer">
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleDeleteTopic(t.id)} className="p-1 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded cursor-pointer">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {(t.subtopics || []).length > 0 && (
+                    <div className="mt-2 pl-3 border-l border-slate-800 space-y-1">
+                      {t.subtopics.map((s: any) => (
+                        <div key={s.id} className="flex items-center justify-between gap-2">
+                          {editingSubtopicId === s.id ? (
+                            <input
+                              autoFocus
+                              value={editingSubtopicName}
+                              onChange={(e) => setEditingSubtopicName(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleRenameSubtopic(s.id)}
+                              className="flex-1 bg-slate-950 border border-slate-800 rounded p-1 text-[11px] text-slate-200 outline-none focus:border-blue-500"
+                            />
+                          ) : (
+                            <span className="text-[11px] text-slate-400">{s.name}</span>
+                          )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {editingSubtopicId === s.id ? (
+                              <button onClick={() => handleRenameSubtopic(s.id)} className="p-0.5 text-emerald-400 hover:bg-slate-800 rounded cursor-pointer">
+                                <CheckSquare className="w-3 h-3" />
+                              </button>
+                            ) : (
+                              <button onClick={() => { setEditingSubtopicId(s.id); setEditingSubtopicName(s.name); }} className="p-0.5 text-slate-500 hover:text-blue-300 hover:bg-slate-800 rounded cursor-pointer">
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
+                            <button onClick={() => handleDeleteSubtopic(s.id)} className="p-0.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded cursor-pointer">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {addingSubtopicTo === t.id && (
+                    <div className="mt-2 pl-3 flex items-center gap-1.5">
+                      <input
+                        autoFocus
+                        value={newSubtopicName}
+                        onChange={(e) => setNewSubtopicName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic(t.id)}
+                        placeholder="Nome do subtópico"
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded p-1 text-[11px] text-slate-200 outline-none focus:border-blue-500"
+                      />
+                      <button onClick={() => handleAddSubtopic(t.id)} className="p-1 text-blue-400 hover:bg-slate-800 rounded cursor-pointer">
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 border-t border-slate-800 flex items-center gap-2">
+              <input
+                value={newTopicName}
+                onChange={(e) => setNewTopicName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()}
+                placeholder="Novo tópico..."
+                className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-blue-500"
+              />
+              <button
+                onClick={handleAddTopic}
+                className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

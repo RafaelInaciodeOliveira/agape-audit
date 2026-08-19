@@ -28,23 +28,45 @@ export const UmblerService = {
     }
   },
 
-  // Busca a lista de chats de clientes
-  getChats: async () => {
+  // Busca a lista de chats de clientes.
+  // chatState: 'Open' | 'Closed' | 'All'. memberId: filtra só chats desse membro (ex: o Ágape).
+  getChats: async (opts: { chatState?: 'Open' | 'Closed' | 'All'; memberId?: string } = {}) => {
     try {
+      const params: Record<string, any> = {
+        organizationId,
+        'Sectors.Rule': 'Any',
+        'Tags.Rule': 'Any',
+        ContactTypes: ['DirectMessage', 'Group'],
+        LastMessage: 'All',
+        Order: 'Desc',
+        ChatOrderBy: 'LastMessage',
+        IncludePinneds: false,
+        Visibility: 'Show',
+        ChatState: opts.chatState || 'All',
+        Take: 250,
+        Behavior: 'CountAllAndGetSlice',
+      };
+      if (opts.memberId) {
+        params['Members.Rule'] = 'ContainsAny';
+        params['Members.Values'] = opts.memberId;
+      }
+
       const response = await umblerApi.get('/v1/chats/', {
-        params: { organizationId },
+        params,
+        paramsSerializer: { indexes: null }, // ContactTypes=DirectMessage&ContactTypes=Group (sem [])
       });
-      // A API pode retornar um array direto ou um objeto paginado (items)
-      if (Array.isArray(response.data)) {
-        return response.data;
+
+      const data = response.data;
+      if (Array.isArray(data)) {
+        return { items: data, total: data.length };
       }
-      if (response.data && Array.isArray(response.data.items)) {
-        return response.data.items;
+      if (data && Array.isArray(data.items)) {
+        return { items: data.items, total: data.page?.totalItems ?? data.items.length };
       }
-      return [];
+      return { items: [], total: 0 };
     } catch (e) {
       console.error('Erro ao buscar chats no Umbler:', e.response?.data || e.message);
-      return []; // Retorna lista vazia em caso de falha para não derrubar a aplicação (500)
+      return { items: [], total: 0 };
     }
   },
 
@@ -64,7 +86,10 @@ export const UmblerService = {
     const response = await umblerApi.get(url, {
       params: {
         organizationId,
-        take: 250
+        FromEventUTC: new Date().toISOString(),
+        Take: 250,
+        Direction: 'TakeBefore',
+        IncludeMetadata: false,
       }
     });
 
