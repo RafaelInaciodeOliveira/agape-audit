@@ -80,7 +80,13 @@ app.get('/api/chats', async (req, res) => {
   try {
     const { carteira, search, attendantId, status } = req.query;
     const db = await getDb();
+    
     const auditedList = await db.collection('audits').find({}, { projection: { _id: 0 } }).toArray();
+    
+    // NOVO: Busca todas as auditorias de resposta para saber quais chats já têm mensagens auditadas
+    const messageAuditsList = await db.collection('messageAudits').find({}, { projection: { chatId: 1 } }).toArray();
+    // Cria um Set para busca super rápida (performance)
+    const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
 
     const targetStatus = status ? String(status).toLowerCase() : 'finalizados';
     // A Umbler só tem ChatState Open/Closed/All — "esperando" é um subconjunto de "Open" (chat.waiting === true)
@@ -95,6 +101,9 @@ app.get('/api/chats', async (req, res) => {
 
     const analyzedChats = chatsToProcess.map((chat: any) => {
       const audit = auditedList.find((a: any) => a.chatId === chat.id);
+      
+      // NOVO: Verifica se o ID deste chat está na lista de mensagens auditadas
+      const hasMessageAudits = chatsWithMessageAudits.has(chat.id);
 
       const combinedTags = [...(chat.tags || []), ...(chat.contact?.tags || [])];
       const tagNames = Array.from(new Set(combinedTags.map((t: any) => t.name).filter(Boolean))) as string[];
@@ -139,6 +148,7 @@ app.get('/api/chats', async (req, res) => {
         hasAgapeInteracted, // O filtro vai usar isso
         chatStatus,
         audit: audit || null,
+        hasMessageAudits, // NOVO: Enviando a flag para o Frontend!
         cachedMessages: [] // Vazio! Força o frontend a buscar o histórico só quando você clicar
       };
     });
@@ -506,7 +516,7 @@ app.get('/api/reports/export', async (req, res) => {
         r.generatedQa ? 'Sim' : 'Não', r.qaQuestion, r.qaAnswer, r.auditorEmail, r.createdAt,
       ].map(toCsvCell).join(','));
     }
-    const csv = '﻿' + lines.join('\r\n'); // BOM garante acentuação certa no Excel
+    const csv = '\uFEFF' + lines.join('\r\n'); // BOM garante acentuação certa no Excel
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="auditorias-agape-${new Date().toISOString().slice(0, 10)}.csv"`);
