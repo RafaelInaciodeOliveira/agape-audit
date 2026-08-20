@@ -7,7 +7,7 @@ import {
   ArrowLeft, BarChart3, Star, Calendar,
   GraduationCap, ListChecks, FileSpreadsheet, LucideIcon,
   TrendingUp, Activity, CheckCircle2, MessageSquareWarning,
-  AlertOctagon, PieChart, Target, AlertTriangle
+  PieChart, Target, AlertTriangle
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -175,7 +175,6 @@ export default function ReportsPage() {
     return `${Math.round((correctAnswers / quality.totalAudited) * 100)}%`;
   };
 
-  // Processamento de dados extras para os novos gráficos
   const totalFails = (quality?.kbFailCount || 0) + (quality?.violatedCount || 0);
   const kbFailPct = totalFails > 0 ? Math.round(((quality?.kbFailCount || 0) / totalFails) * 100) : 0;
   const promptFailPct = totalFails > 0 ? Math.round(((quality?.violatedCount || 0) / totalFails) * 100) : 0;
@@ -186,8 +185,9 @@ export default function ReportsPage() {
     .sort((a, b) => b.errorRate - a.errorRate)
     .slice(0, 4);
 
-  const starColors = ['text-red-500', 'text-orange-500', 'text-amber-400', 'text-lime-400', 'text-emerald-400'];
-  const starBgs = ['bg-red-500', 'bg-orange-500', 'bg-amber-400', 'bg-lime-400', 'bg-emerald-400'];
+  // CORES CORRIGIDAS: Agora vai do verde (5) ao vermelho (1) perfeitamente
+  const starColors = ['text-emerald-400', 'text-lime-400', 'text-amber-400', 'text-orange-500', 'text-red-500'];
+  const starBgs = ['bg-emerald-400', 'bg-lime-400', 'bg-amber-400', 'bg-orange-500', 'bg-red-500'];
   const allStars = [5, 4, 3, 2, 1];
   const maxStarsCount = value?.ratingDistribution ? Math.max(1, ...value.ratingDistribution.map(r => r.count)) : 1;
 
@@ -201,7 +201,7 @@ export default function ReportsPage() {
           </Link>
           <div>
             <h1 className="text-2xl font-black text-slate-100 flex items-center gap-2.5 tracking-tight">
-              <BarChart3 className="w-7 h-7 text-blue-500" /> Relatórios de Inteligência (BI)
+              <BarChart3 className="w-7 h-7 text-blue-500" /> Relatórios Ágape
             </h1>
             <p className="text-sm text-slate-500 mt-1">Análise profunda do comportamento e performance do Ágape.</p>
           </div>
@@ -337,7 +337,7 @@ export default function ReportsPage() {
             {/* ROW 4: NOVOS GRÁFICOS (NOTAS, MOTIVOS, CARTEIRAS) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
               
-              {/* ITEM 1: Distribuição de Notas */}
+              {/* ITEM 1: Distribuição de Notas - Ordem de Cores Corrigida */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -352,11 +352,11 @@ export default function ReportsPage() {
                     const wPct = (count / maxStarsCount) * 100;
                     return (
                       <div key={i} className="flex items-center gap-3">
-                        <div className={`flex items-center gap-1 font-bold text-xs w-10 shrink-0 ${starColors[5-s]}`}>
+                        <div className={`flex items-center gap-1 font-bold text-xs w-10 shrink-0 ${starColors[i]}`}>
                           {s} <Star className={`w-3.5 h-3.5 fill-current`} />
                         </div>
                         <div className="flex-1 h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 shadow-inner">
-                          <div className={`h-full ${starBgs[5-s]} transition-all duration-500`} style={{ width: `${wPct}%` }} />
+                          <div className={`h-full ${starBgs[i]} transition-all duration-500`} style={{ width: `${wPct}%` }} />
                         </div>
                         <div className="w-6 text-right text-xs font-mono text-slate-400">{count}</div>
                       </div>
@@ -380,7 +380,6 @@ export default function ReportsPage() {
                     </div>
                   ) : (
                     <>
-                      {/* Barra Split */}
                       <div className="h-6 w-full bg-slate-950 rounded-lg overflow-hidden flex border border-slate-800 shadow-inner mb-6">
                         <div className="h-full bg-red-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500" style={{ width: `${kbFailPct}%` }}>
                           {kbFailPct > 15 ? `${kbFailPct}%` : ''}
@@ -389,8 +388,6 @@ export default function ReportsPage() {
                           {promptFailPct > 15 ? `${promptFailPct}%` : ''}
                         </div>
                       </div>
-                      
-                      {/* Legenda Detalhada */}
                       <div className="space-y-3">
                         <div className="flex justify-between items-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
                           <div className="flex items-center gap-2">

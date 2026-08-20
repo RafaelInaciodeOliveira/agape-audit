@@ -230,7 +230,7 @@ export default function AuditDashboard() {
     try {
       const auditsRes = await axios.get(`${API_URL}/chats/${chat.id}/message-audits`);
       setMessageAudits(auditsRes.data || {});
-    } catch (_) {
+    } catch {
       setMessageAudits({});
     }
 
@@ -399,8 +399,7 @@ export default function AuditDashboard() {
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
 
-      {/* 1. PAINEL ESQUERDO: Escala Média */}
-      <div className="w-[20rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
+      <div className="w-[22rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
         
         <div className="p-5 border-b border-slate-800/80 space-y-4 bg-slate-900/40">
           <div className="flex items-center justify-between">
@@ -541,8 +540,8 @@ export default function AuditDashboard() {
                       (() => {
                         const colors = getRatingColor(chat.audit!.rating);
                         return (
-                          <span className={`flex items-center font-bold gap-1 px-2 py-0.5 rounded shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
-                            <Star className={`w-3 h-3 ${colors.fill}`} /> {chat.audit!.rating}★
+                          <span className={`flex items-center justify-center font-black gap-1 px-2.5 py-0.5 rounded-md shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
+                            {chat.audit!.rating} <Star className={`w-3.5 h-3.5 ${colors.fill}`} />
                           </span>
                         );
                       })()
@@ -563,7 +562,6 @@ export default function AuditDashboard() {
         </div>
       </div>
 
-      {/* 2. PAINEL CENTRAL */}
       <div className="flex-1 flex flex-col bg-slate-900/40 relative">
         {selectedChat ? (
           <>
@@ -754,7 +752,6 @@ export default function AuditDashboard() {
         )}
       </div>
 
-      {/* 3. PAINEL DIREITO: Escala Média */}
       {selectedChat && rightPanelMode === 'message' && selectedMessage && (
         <div className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/80">
