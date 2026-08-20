@@ -4,87 +4,81 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import { 
-  ArrowLeft, BarChart3, MessageSquareWarning, Star, 
-  GraduationCap, ListChecks, FileSpreadsheet, LucideIcon 
+  ArrowLeft, BarChart3, Star, Calendar,
+  GraduationCap, ListChecks, FileSpreadsheet, LucideIcon,
+  TrendingUp, Activity, CheckCircle2, MessageSquareWarning,
+  AlertOctagon, PieChart, Target, AlertTriangle
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-interface ThemeRow {
-  topicName: string;
-  subtopicName?: string;
-  total: number;
-  kbFailCount: number;
+// --- Interfaces Atualizadas ---
+interface ThemeRow { topicName: string; subtopicName?: string; total: number; kbFailCount: number; }
+interface DailyRow { day: string; total: number; kbFailCount?: number; [key: string]: string | number | undefined; }
+interface CarteiraRow { carteira: string; total: number; kbFailCount: number; violatedCount: number; }
+interface QualityData { 
+  totalAudited: number; 
+  kbFailCount: number; 
+  violatedCount: number;
+  avgRating: string | number | null; 
+  byDay: DailyRow[]; 
+  byCarteira: CarteiraRow[];
 }
-
-interface DailyRow {
-  day: string;
-  total: number;
-  kbFailCount?: number;
-  [key: string]: string | number | undefined; 
+interface ValueData { 
+  qaGenerated: number; 
+  messagesAuditedByDay: DailyRow[]; 
+  ratingDistribution: { rating: number; count: number }[];
 }
+interface StatCardProps { icon: LucideIcon; label: string; value: string | number; accent: string; }
 
-interface QualityData {
-  totalAudited: number;
-  kbFailCount: number;
-  avgRating: string | number | null;
-  byDay: DailyRow[];
-}
-
-interface ValueData {
-  qaGenerated: number;
-  messagesAuditedByDay: DailyRow[];
-}
-
-interface StatCardProps {
-  icon: LucideIcon;
-  label: string;
-  value: string | number;
-  accent: string;
-}
-
+// --- Componentes ---
 function StatCard({ icon: Icon, label, value, accent }: StatCardProps) {
   return (
-    <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 flex items-center gap-3">
-      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${accent}`}>
-        <Icon className="w-4.5 h-4.5" />
+    <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-5 flex items-center gap-4 transition-all hover:scale-[1.02] hover:bg-slate-900/80 shadow-lg shadow-black/20">
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${accent}`}>
+        <Icon className="w-6 h-6" />
       </div>
       <div>
-        <div className="text-lg font-bold text-slate-100 leading-tight">{value}</div>
-        <div className="text-xs text-slate-500">{label}</div>
+        <div className="text-2xl font-black text-slate-100 tracking-tight leading-tight">{value}</div>
+        <div className="text-xs font-medium text-slate-500 mt-1">{label}</div>
       </div>
     </div>
   );
 }
 
+// Gráfico de Temas (Volume)
 function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
   const max = Math.max(1, ...rows.map((r) => r.total));
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-4 mt-3 w-full">
       {rows.length === 0 && (
-        <p className="text-xs text-slate-500">Nenhuma resposta auditada com tópico ainda.</p>
+        <div className="py-8 text-center border border-dashed border-slate-800 rounded-xl w-full">
+          <p className="text-sm text-slate-500">Nenhum dado auditado no período.</p>
+        </div>
       )}
       {rows.map((r, i) => {
         const label = r.subtopicName ? `${r.topicName || 'Sem tópico'} · ${r.subtopicName}` : (r.topicName || 'Sem tópico');
         const pct = (r.total / max) * 100;
         const kbFailPct = r.total > 0 ? (r.kbFailCount / r.total) * 100 : 0;
+        
         return (
-          <div key={i}>
-            <div className="flex justify-between items-baseline gap-3 text-xs mb-1">
-              <span className="text-slate-300 font-medium truncate min-w-0">{label}</span>
-              <span className="text-slate-500 font-mono shrink-0 whitespace-nowrap">
-                {r.total}{r.kbFailCount > 0 && <span className="text-red-400"> ({r.kbFailCount} falha base)</span>}
-              </span>
+          <div key={i} className="group relative w-full">
+            <div className="flex justify-between items-baseline gap-3 text-xs mb-1.5">
+              <span className="text-slate-300 font-semibold truncate min-w-0">{label}</span>
+              <span className="text-slate-400 font-mono shrink-0 whitespace-nowrap">{r.total} audits</span>
             </div>
-            <div className="h-2.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-              <div className="h-full bg-blue-600/70 relative" style={{ width: `${pct}%` }}>
+            <div className="h-4 bg-slate-950 rounded-full overflow-hidden border border-slate-800/80 shadow-inner w-full flex">
+              <div className="h-full bg-blue-600 relative transition-all duration-500 flex" style={{ width: `${pct}%` }}>
                 {kbFailPct > 0 && (
-                  <div
-                    className="absolute right-0 top-0 h-full bg-red-500/80"
-                    style={{ width: `${kbFailPct}%` }}
-                  />
+                  <div className="h-full bg-red-500 transition-all duration-500 border-l border-slate-900/20" style={{ width: `${kbFailPct}%` }} />
                 )}
               </div>
+            </div>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max max-w-[16rem] bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex flex-col gap-1">
+              <span className="font-bold text-slate-100 border-b border-slate-600 pb-1 mb-1">{label}</span>
+              <span className="text-blue-300">• Total auditado: <span className="font-mono font-bold text-white">{r.total}</span></span>
+              <span className="text-emerald-400">• Corretas: <span className="font-mono font-bold text-white">{r.total - r.kbFailCount}</span></span>
+              {r.kbFailCount > 0 && <span className="text-red-400">• Falhas na Base: <span className="font-mono font-bold">{r.kbFailCount}</span></span>}
             </div>
           </div>
         );
@@ -93,26 +87,49 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
   );
 }
 
-function DailyBarChart({ rows, failKey }: { rows: DailyRow[]; failKey?: string }) {
-  const max = Math.max(1, ...rows.map((r) => r.total));
+// Gráfico de Barras Vertical
+function DailyBarChart({ rows, failKey, colorClass = "bg-blue-600" }: { rows: DailyRow[]; failKey?: string, colorClass?: string }) {
+  const actualMax = Math.max(1, ...rows.map((r) => r.total));
+  const gridMax = Math.max(5, Math.ceil((actualMax * 1.4) / 5) * 5); 
+  const gridLines = [gridMax, gridMax * 0.75, gridMax * 0.5, gridMax * 0.25, 0];
+
   return (
-    <div className="flex items-end gap-2 overflow-x-auto custom-scrollbar pb-1">
-      {rows.length === 0 && <p className="text-xs text-slate-500">Sem dados no período.</p>}
+    <div className="relative h-[22rem] w-full flex items-end gap-6 pt-12 pb-8 pl-12 pr-16 overflow-x-auto custom-scrollbar">
+      <div className="absolute inset-0 pt-12 pb-8 flex flex-col justify-between pointer-events-none min-w-full">
+        {gridLines.map((lineVal, i) => (
+          <div key={i} className="relative w-full border-t border-slate-800/60 h-0 flex items-center">
+             <span className="absolute -left-10 text-[11px] text-slate-500 font-mono w-8 text-right pr-2">{Math.round(lineVal)}</span>
+          </div>
+        ))}
+      </div>
+      {rows.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center"><p className="text-sm text-slate-500">Sem dados.</p></div>
+      )}
       {rows.map((r, i) => {
-        const heightPct = (r.total / max) * 100;
+        const heightPct = (r.total / gridMax) * 100;
         const failCount = failKey ? Number(r[failKey] || 0) : 0;
         const failPct = r.total > 0 ? (failCount / r.total) * 100 : 0;
+        
         return (
-          <div key={i} className="flex flex-col items-center gap-1.5 shrink-0 w-9" title={`${r.day}: ${r.total}`}>
-            <span className="text-[10px] text-slate-400 font-mono">{r.total > 0 ? r.total : ''}</span>
-            <div className="w-full bg-slate-900 rounded-t border border-slate-800 relative flex flex-col justify-end" style={{ height: '96px' }}>
-              <div className="bg-blue-600/70 w-full relative" style={{ height: `${heightPct}%` }}>
-                {failPct > 0 && (
-                  <div className="absolute bottom-0 left-0 w-full bg-red-500/80" style={{ height: `${failPct}%` }} />
+          <div key={i} className="relative flex flex-col items-center gap-2 shrink-0 w-12 group h-full justify-end z-10">
+            <div className="w-full bg-slate-900 rounded-t border border-slate-700/50 relative flex flex-col justify-end transition-all group-hover:brightness-125 group-hover:border-slate-400" style={{ height: `${heightPct}%` }}>
+              <div className={`${colorClass} w-full relative rounded-t`} style={{ height: '100%' }}>
+                {failPct > 0 && <div className="absolute bottom-0 left-0 w-full bg-red-500" style={{ height: `${failPct}%` }} />}
+              </div>
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex flex-col gap-1 items-center whitespace-nowrap">
+                <span className="font-bold border-b border-slate-600 pb-1 mb-1 w-full text-center text-slate-200">{r.day}</span>
+                <span className="text-slate-300">Total Auditado: <span className="font-mono font-bold text-white">{r.total}</span></span>
+                {failKey && (
+                  <>
+                    <span className="text-emerald-400">Corretas: <span className="font-mono font-bold text-white">{r.total - failCount}</span></span>
+                    {failCount > 0 && <span className="text-red-400">Falhas Incorretas: <span className="font-mono font-bold">{failCount}</span></span>}
+                  </>
                 )}
               </div>
             </div>
-            <span className="text-[9px] text-white font-mono whitespace-nowrap">{r.day?.slice(5)}</span>
+            <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap absolute -bottom-5">
+              {r.day?.slice(5).replace('-', '/')}
+            </span>
           </div>
         );
       })}
@@ -126,136 +143,313 @@ export default function ReportsPage() {
   const [value, setValue] = useState<ValueData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState('30'); 
 
   useEffect(() => {
-    document.title = 'Relatórios · Auditoria Ágape';
+    document.title = 'Relatórios de BI · Auditoria Ágape';
     const load = async () => {
+      setLoading(true);
       try {
         setError(null);
         const [themesRes, qualityRes, valueRes] = await Promise.all([
-          axios.get(`${API_URL}/reports/themes`),
-          axios.get(`${API_URL}/reports/quality`),
-          axios.get(`${API_URL}/reports/value`),
+          axios.get(`${API_URL}/reports/themes?days=${period}`),
+          axios.get(`${API_URL}/reports/quality?days=${period}`),
+          axios.get(`${API_URL}/reports/value?days=${period}`),
         ]);
         setThemes(themesRes.data || []);
         setQuality(qualityRes.data);
         setValue(valueRes.data);
       } catch (err) {
         console.error('Erro ao buscar relatórios:', err);
-        setError('Não foi possível carregar os dados. Verifique a conexão com o servidor.');
+        setError('Não foi possível carregar os dados do painel.');
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, []);
+  }, [period]);
 
-  const pct = (n: number, total: number) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '—');
+  const calculateConformity = () => {
+    if (!quality || quality.totalAudited === 0) return '—';
+    const correctAnswers = quality.totalAudited - quality.kbFailCount;
+    return `${Math.round((correctAnswers / quality.totalAudited) * 100)}%`;
+  };
+
+  // Processamento de dados extras para os novos gráficos
+  const totalFails = (quality?.kbFailCount || 0) + (quality?.violatedCount || 0);
+  const kbFailPct = totalFails > 0 ? Math.round(((quality?.kbFailCount || 0) / totalFails) * 100) : 0;
+  const promptFailPct = totalFails > 0 ? Math.round(((quality?.violatedCount || 0) / totalFails) * 100) : 0;
+
+  const bottlenecks = [...themes]
+    .map(t => ({ ...t, errorRate: t.total > 0 ? t.kbFailCount / t.total : 0 }))
+    .filter(t => t.errorRate > 0)
+    .sort((a, b) => b.errorRate - a.errorRate)
+    .slice(0, 4);
+
+  const starColors = ['text-red-500', 'text-orange-500', 'text-amber-400', 'text-lime-400', 'text-emerald-400'];
+  const starBgs = ['bg-red-500', 'bg-orange-500', 'bg-amber-400', 'bg-lime-400', 'bg-emerald-400'];
+  const allStars = [5, 4, 3, 2, 1];
+  const maxStarsCount = value?.ratingDistribution ? Math.max(1, ...value.ratingDistribution.map(r => r.count)) : 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href="/" className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-blue-300 transition-all">
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <h1 className="text-lg font-bold text-blue-400 flex items-center gap-2 flex-1">
-          <BarChart3 className="w-5 h-5" /> Relatórios de Auditoria do Ágape
-        </h1>
-        <a
-          href={`${API_URL}/reports/export`}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs font-medium text-slate-300 hover:text-emerald-300 hover:border-emerald-500/40 transition-all"
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5" /> Exportar CSV
-        </a>
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased p-6 md:p-10 w-full mx-auto">
+      
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8 max-w-7xl mx-auto">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-blue-300 hover:bg-slate-800 transition-all shadow-sm">
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-black text-slate-100 flex items-center gap-2.5 tracking-tight">
+              <BarChart3 className="w-7 h-7 text-blue-500" /> Relatórios de Inteligência (BI)
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">Análise profunda do comportamento e performance do Ágape.</p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 shadow-sm">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <select 
+              value={period} 
+              onChange={(e) => setPeriod(e.target.value)}
+              className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold"
+            >
+              <option value="7" className="bg-slate-900">Últimos 7 dias</option>
+              <option value="30" className="bg-slate-900">Últimos 30 dias</option>
+              <option value="all" className="bg-slate-900">Todo o período</option>
+            </select>
+          </div>
+
+          <a
+            href={`${API_URL}/reports/export`}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4" /> Exportar (CSV)
+          </a>
+        </div>
       </div>
 
-      {loading ? (
-        // NOVO SKELETON: Cópia idêntica da estrutura original para não "encolher"
-        <div className="space-y-8 animate-pulse">
-          {/* Subtítulo falso */}
-          <div className="space-y-2 -mt-2">
-            <div className="h-3 bg-slate-800/40 rounded w-full max-w-2xl"></div>
-            <div className="h-3 bg-slate-800/40 rounded w-3/4 max-w-xl"></div>
+      <div className="max-w-7xl mx-auto">
+        {loading ? (
+          <div className="space-y-6 w-full animate-pulse mt-4 flex flex-col items-center justify-center py-20 text-slate-500">
+            <Activity className="w-10 h-10 animate-spin text-blue-500 mb-4" />
+            Processando métricas de BI...
           </div>
-          
-          {/* 4 Cards menores falsos */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-4 flex items-center gap-3 h-[74px]">
-                <div className="w-9 h-9 rounded-lg bg-slate-800/50 shrink-0"></div>
-                <div className="flex flex-col gap-2 w-full">
-                  <div className="h-4 bg-slate-700/50 rounded w-1/2"></div>
-                  <div className="h-2.5 bg-slate-800/50 rounded w-3/4"></div>
+        ) : error ? (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm mb-6 flex items-center gap-2 font-medium">
+            <MessageSquareWarning className="w-5 h-5" /> {error}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-6 w-full">
+            
+            {/* ROW 1: CARDS GERAIS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+              <StatCard icon={ListChecks} label="Mensagens Revisadas" value={quality?.totalAudited ?? 0} accent="bg-blue-500/10 text-blue-400 border border-blue-500/20" />
+              <StatCard icon={CheckCircle2} label="Taxa de Conformidade (IA)" value={calculateConformity()} accent="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" />
+              <StatCard icon={Star} label="Satisfação (Nota Média)" value={quality?.avgRating ? Number(quality.avgRating).toFixed(1) : '—'} accent="bg-amber-500/10 text-amber-400 border border-amber-500/20" />
+              <StatCard icon={GraduationCap} label="Treinamentos Realizados" value={value?.qaGenerated ?? 0} accent="bg-violet-500/10 text-violet-400 border border-violet-500/20" />
+            </div>
+
+            {/* ROW 2: TEMAS (ESQUERDA) E GARGALOS (DIREITA) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
+              
+              <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-6 gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-blue-400" /> Distribuição por Temas
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">Volume de respostas agrupadas pelos tópicos de atendimento.</p>
+                  </div>
+                  <div className="flex gap-4 text-xs font-semibold text-slate-400 bg-slate-950 p-2.5 rounded-lg border border-slate-800 shrink-0">
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-600 shadow-inner"></span> Corretas</span>
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500 shadow-inner"></span> Falha</span>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar max-h-64">
+                  <ThemesBarChart rows={themes} />
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* 3 Blocos de Gráficos falsos */}
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-5">
-               <div className="flex justify-between items-start mb-6">
-                 <div className="w-full">
-                    <div className="h-4 bg-slate-700/50 rounded w-48 mb-2"></div>
-                    <div className="h-2.5 bg-slate-800/50 rounded w-full max-w-md"></div>
-                 </div>
-               </div>
-               <div className="h-[120px] w-full bg-slate-800/20 rounded border border-slate-800/40"></div>
-            </div>
-          ))}
-        </div>
-      ) : error ? (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm mb-6">
-          {error}
-        </div>
-      ) : (
-        <div className="space-y-8">
-          <p className="text-xs text-slate-500 -mt-2 leading-relaxed max-w-2xl">
-            Estes números refletem o que já foi auditado manualmente, não 100% do volume de conversas do Ágape na Umbler.
-          </p>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard icon={ListChecks} label="Respostas auditadas" value={quality?.totalAudited ?? 0} accent="bg-blue-500/10 text-blue-400" />
-            <StatCard icon={MessageSquareWarning} label="Falha na base" value={pct(quality?.kbFailCount ?? 0, quality?.totalAudited ?? 0)} accent="bg-red-500/10 text-red-400" />
-            <StatCard icon={Star} label="Nota média do chat" value={quality?.avgRating ? Number(quality.avgRating).toFixed(1) : '—'} accent="bg-amber-500/10 text-amber-400" />
-            <StatCard icon={GraduationCap} label="Q&As gerados p/ treino" value={value?.qaGenerated ?? 0} accent="bg-emerald-500/10 text-emerald-400" />
-          </div>
-
-          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-5">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-sm font-bold text-slate-200 mb-1">Temas mais perguntados</h2>
-                <p className="text-xs text-slate-500">Volume de respostas auditadas por tópico/subtópico.</p>
-              </div>
-              <div className="flex gap-3 text-xs text-slate-400">
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600/70"></span> Total</span>
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500/80"></span> Falha na base</span>
+              {/* ITEM 4: GARGALOS CRÍTICOS */}
+              <div className="lg:col-span-1 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
+                <div className="mb-5">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-400" /> Gargalos Críticos
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Tópicos com as maiores % de erro.</p>
+                </div>
+                <div className="flex-1 flex flex-col gap-3">
+                  {bottlenecks.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-sm text-slate-500">Nenhum erro registrado.</div>
+                  ) : (
+                    bottlenecks.map((b, i) => (
+                      <div key={i} className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-3 flex justify-between items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold text-slate-200 truncate">{b.subtopicName ? `${b.topicName} > ${b.subtopicName}` : b.topicName}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{b.kbFailCount} falhas em {b.total} respostas</div>
+                        </div>
+                        <div className="shrink-0 bg-red-500/10 border border-red-500/20 text-red-400 font-black text-sm px-2.5 py-1 rounded-lg">
+                          {Math.round(b.errorRate * 100)}%
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-            <ThemesBarChart rows={themes} />
-          </div>
 
-          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-5">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-sm font-bold text-slate-200 mb-1">Qualidade ao longo do tempo</h2>
-                <p className="text-xs text-slate-500">Volume de respostas auditadas por dia.</p>
+            {/* ROW 3: DESEMPENHO E RITMO (Gráficos Verticais) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col w-full">
+                <div className="mb-2">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-amber-400" /> Desempenho Diário
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Comparativo de acertos vs falhas na base cometidas pela IA.</p>
+                </div>
+                <div className="flex-1 w-full">
+                  <DailyBarChart rows={quality?.byDay || []} failKey="kbFailCount" colorClass="bg-blue-600" />
+                </div>
+                <div className="flex justify-center gap-5 text-xs font-semibold text-slate-400 mt-2">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-600"></span> Resposta Correta</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500"></span> Falha na Base</span>
+                </div>
               </div>
-              <div className="flex gap-3 text-xs text-slate-400">
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600/70"></span> Total</span>
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500/80"></span> Falha</span>
+
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col w-full">
+                <div className="mb-2">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <ListChecks className="w-5 h-5 text-emerald-400" /> Ritmo de Auditoria
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Histórico de produtividade das revisões diárias.</p>
+                </div>
+                <div className="flex-1 w-full">
+                  <DailyBarChart rows={value?.messagesAuditedByDay || []} colorClass="bg-emerald-600" />
+                </div>
+                <div className="flex justify-center gap-5 text-xs font-semibold text-slate-400 mt-2">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-600"></span> Total Revisado</span>
+                </div>
               </div>
             </div>
-            <DailyBarChart rows={quality?.byDay || []} failKey="kbFailCount" />
-          </div>
 
-          <div className="bg-slate-900/40 border border-slate-800/60 rounded-xl p-5">
-            <h2 className="text-sm font-bold text-slate-200 mb-1">Volume de auditorias por dia</h2>
-            <p className="text-xs text-slate-500 mb-4">Quantas respostas do Ágape foram revisadas por dia.</p>
-            <DailyBarChart rows={value?.messagesAuditedByDay || []} />
+            {/* ROW 4: NOVOS GRÁFICOS (NOTAS, MOTIVOS, CARTEIRAS) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
+              
+              {/* ITEM 1: Distribuição de Notas */}
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
+                <div className="mb-5">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <Star className="w-5 h-5 text-amber-400" /> Distribuição de Notas
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Volume de chats por avaliação de satisfação geral.</p>
+                </div>
+                <div className="flex-1 flex flex-col justify-center gap-3">
+                  {allStars.map((s, i) => {
+                    const match = value?.ratingDistribution?.find(d => d.rating === s);
+                    const count = match ? match.count : 0;
+                    const wPct = (count / maxStarsCount) * 100;
+                    return (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className={`flex items-center gap-1 font-bold text-xs w-10 shrink-0 ${starColors[5-s]}`}>
+                          {s} <Star className={`w-3.5 h-3.5 fill-current`} />
+                        </div>
+                        <div className="flex-1 h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 shadow-inner">
+                          <div className={`h-full ${starBgs[5-s]} transition-all duration-500`} style={{ width: `${wPct}%` }} />
+                        </div>
+                        <div className="w-6 text-right text-xs font-mono text-slate-400">{count}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ITEM 2: Motivos de Falha */}
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
+                <div className="mb-5">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <PieChart className="w-5 h-5 text-purple-400" /> Motivos de Erro
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Comparativo de respostas incorretas vs violação de regras.</p>
+                </div>
+                <div className="flex-1 flex flex-col justify-center">
+                  {totalFails === 0 ? (
+                    <div className="text-center text-sm text-emerald-500 font-bold bg-emerald-500/10 py-6 rounded-xl border border-emerald-500/20">
+                      Nenhuma falha detectada! 🎉
+                    </div>
+                  ) : (
+                    <>
+                      {/* Barra Split */}
+                      <div className="h-6 w-full bg-slate-950 rounded-lg overflow-hidden flex border border-slate-800 shadow-inner mb-6">
+                        <div className="h-full bg-red-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500" style={{ width: `${kbFailPct}%` }}>
+                          {kbFailPct > 15 ? `${kbFailPct}%` : ''}
+                        </div>
+                        <div className="h-full bg-purple-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500" style={{ width: `${promptFailPct}%` }}>
+                          {promptFailPct > 15 ? `${promptFailPct}%` : ''}
+                        </div>
+                      </div>
+                      
+                      {/* Legenda Detalhada */}
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded bg-red-500 shadow-inner"></span>
+                            <span className="text-xs font-bold text-slate-300">Falta na Base de Conhecimento</span>
+                          </div>
+                          <span className="text-sm font-mono font-bold text-red-400">{quality?.kbFailCount}</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span className="w-3 h-3 rounded bg-purple-500 shadow-inner"></span>
+                            <span className="text-xs font-bold text-slate-300">Violação de Prompt / Comportamento</span>
+                          </div>
+                          <span className="text-sm font-mono font-bold text-purple-400">{quality?.violatedCount}</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* ITEM 3: Desempenho por Carteira */}
+              <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
+                <div className="mb-5">
+                  <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <Target className="w-5 h-5 text-pink-400" /> Conformidade por Carteira
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Taxa de sucesso geral da IA por segmentação de clientes.</p>
+                </div>
+                <div className="flex-1 flex flex-col gap-3 overflow-y-auto max-h-52 custom-scrollbar pr-2">
+                  {(!quality?.byCarteira || quality.byCarteira.length === 0) ? (
+                    <div className="flex-1 flex items-center justify-center text-sm text-slate-500">Sem dados.</div>
+                  ) : (
+                    quality.byCarteira.map((c, i) => {
+                      const conformityPct = c.total > 0 ? Math.round(((c.total - c.kbFailCount) / c.total) * 100) : 0;
+                      let color = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
+                      if (conformityPct < 85) color = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
+                      if (conformityPct < 70) color = 'text-red-400 bg-red-500/10 border-red-500/30';
+
+                      return (
+                        <div key={i} className="flex justify-between items-center bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
+                          <div>
+                            <div className="text-xs font-bold text-slate-200">{c.carteira}</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">{c.total} chats auditados</div>
+                          </div>
+                          <div className={`px-2.5 py-1 rounded-lg border font-black text-xs ${color}`}>
+                            {conformityPct}%
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
