@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { MongoClient, Db } from 'mongodb';
 import { UmblerService } from './services/umbler.js';
+import knowledgeRoutes from './routes/knowledgeRoutes.js';
 
 dotenv.config();
 
@@ -10,10 +12,21 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Conexão do Mongoose (Usado pela Base de Conhecimento)
+const mongoUri = process.env.MONGODB_URI || '';
+if (mongoUri) {
+  mongoose.connect(mongoUri)
+    .then(() => console.log('🍃 Mongoose conectado com sucesso ao MongoDB Atlas!'))
+    .catch((err) => console.error('❌ Erro ao conectar Mongoose:', err));
+}
+
+// Rota da Central da Base de Conhecimento
+app.use('/api/knowledge', knowledgeRoutes);
+
 let dbInstance: Db | null = null;
 async function getDb(): Promise<Db> {
   if (dbInstance) return dbInstance;
-  const client = new MongoClient(process.env.MONGODB_URI as string);
+  const client = new MongoClient(mongoUri);
   await client.connect();
   dbInstance = client.db();
   return dbInstance;
@@ -79,7 +92,7 @@ app.get('/api/chats', async (req, res) => {
     const targetStatus = status ? String(status).toLowerCase() : 'finalizados';
     const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
 
-    const { items: umblerChats, total: umblerTotal } = await UmblerService.getChats({
+    const { items: umblerChats } = await UmblerService.getChats({
       chatState,
       memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined,
     });
@@ -164,7 +177,7 @@ app.get('/api/chats/:id/messages', async (req, res) => {
     const { id } = req.params;
     const messages = await UmblerService.getChatMessages(id);
     res.json(messages);
-  } catch (error: any) {
+  } catch {
     res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' });
   }
 });
@@ -192,12 +205,11 @@ app.post('/api/audits', async (req, res) => {
   }
 });
 
-app.get('/api/config', (req, res) => {
+app.get('/api/config', (_req, res) => {
   res.json({ agapeMemberId: AGAPE_MEMBER_ID, attendants: KNOWN_ATTENDANTS });
 });
 
-// TOPICOS / SUBTOPICOS CRUD OMITIDO POR ESPAÇO, PODE MANTER O SEU NORMALMENTE
-app.get('/api/topics', async (req, res) => {
+app.get('/api/topics', async (_req, res) => {
   try {
     const db = await getDb();
     const topics = await db.collection('topics').find({}, { projection: { _id: 0 } }).sort({ name: 1 }).toArray();
@@ -206,6 +218,7 @@ app.get('/api/topics', async (req, res) => {
     res.json(result);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.post('/api/topics', async (req, res) => {
   try {
     const { name } = req.body;
@@ -215,6 +228,7 @@ app.post('/api/topics', async (req, res) => {
     res.json({ id, name, subtopics: [] });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.put('/api/topics/:id', async (req, res) => {
   try {
     const db = await getDb();
@@ -222,6 +236,7 @@ app.put('/api/topics/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.delete('/api/topics/:id', async (req, res) => {
   try {
     const db = await getDb();
@@ -230,6 +245,7 @@ app.delete('/api/topics/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.post('/api/topics/:topicId/subtopics', async (req, res) => {
   try {
     const db = await getDb();
@@ -238,6 +254,7 @@ app.post('/api/topics/:topicId/subtopics', async (req, res) => {
     res.json({ id, topicId: req.params.topicId, name: req.body.name });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.put('/api/subtopics/:id', async (req, res) => {
   try {
     const db = await getDb();
@@ -245,6 +262,7 @@ app.put('/api/subtopics/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
+
 app.delete('/api/subtopics/:id', async (req, res) => {
   try {
     const db = await getDb();
@@ -265,13 +283,29 @@ app.get('/api/chats/:id/message-audits', async (req, res) => {
 
 app.post('/api/message-audits', async (req, res) => {
   try {
-    const { chatId, messageId, clientQuestion, topicId, subtopicId, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, qaQuestion, qaAnswer, auditorEmail } = req.body;
+    const { chatId, messageId, clientQuestion, topicId, subtopicId, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = req.body;
     let generatedQa = 0;
+    
+    const db = await getDb();
+
     if (trainAi && qaQuestion && qaAnswer) {
       await UmblerService.createKnowledgeBaseQA(qaQuestion, qaAnswer);
+      
+      // Injeta também na Central da Base de Conhecimento do módulo selecionado
+      await db.collection('knowledge').insertOne({
+        id: newId(),
+        module: targetModule || 'Módulo Geral',
+        section: 'Auditorias Recentes',
+        title: qaQuestion,
+        content: qaAnswer,
+        source: 'auditoria',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
       generatedQa = 1;
     }
-    const db = await getDb();
+
     await db.collection('messageAudits').updateOne(
       { chatId, messageId },
       {
@@ -281,6 +315,7 @@ app.post('/api/message-audits', async (req, res) => {
           violatedPromptRules: violatedPromptRules ? 1 : 0,
           knowledgeBaseFail: knowledgeBaseFail ? 1 : 0,
           auditorFeedback, generatedQa,
+          targetModule: targetModule || null,
           qaQuestion: generatedQa ? qaQuestion : null,
           qaAnswer: generatedQa ? qaAnswer : null,
           auditorEmail, createdAt: new Date().toISOString(),
@@ -293,7 +328,6 @@ app.post('/api/message-audits', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// ==== RELATÓRIOS (COM FILTRO DE DATA E BI AVANÇADO) ====
 app.get('/api/reports/themes', async (req, res) => {
   try {
     const { days } = req.query;
@@ -350,7 +384,6 @@ app.get('/api/reports/quality', async (req, res) => {
     ]);
 
     const totalAudited = audits.length;
-    // Puxa as métricas exatas de tipos de falha nas respostas
     const violatedCount = audits.filter((a: any) => a.violatedPromptRules).length;
     const kbFailCount = audits.filter((a: any) => a.knowledgeBaseFail).length;
 
@@ -368,7 +401,6 @@ app.get('/api/reports/quality', async (req, res) => {
     }
     const byDay = Array.from(byDayMap.values()).sort((a, b) => a.day.localeCompare(b.day));
 
-    // NOVO: Agrupa o desempenho por Carteira usando as auditorias gerais do Chat
     const byCarteiraMap = new Map<string, any>();
     for (const c of chatAudits) {
       const carteira = c.carteiraTag || 'Outros';
@@ -412,7 +444,7 @@ app.get('/api/reports/value', async (req, res) => {
     }
     const ratingDistribution = Array.from(ratingCounts.entries())
       .map(([rating, count]) => ({ rating, count }))
-      .sort((a, b) => b.rating - a.rating); // Decrescente será feito no frontend
+      .sort((a, b) => b.rating - a.rating);
 
     const byDayMap = new Map<string, number>();
     for (const a of messageAudits) {
@@ -432,7 +464,7 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-app.get('/api/reports/export', async (req, res) => {
+app.get('/api/reports/export', async (_req, res) => {
   try {
     const db = await getDb();
     const [audits, topics, subtopics] = await Promise.all([
@@ -467,5 +499,5 @@ app.get('/api/reports/export', async (req, res) => {
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Restaurado com Sucesso na porta ${PORT}!`);
+  console.log(`🚀 Servidor Restaurado e Mongoose Conectado na porta ${PORT}!`);
 });

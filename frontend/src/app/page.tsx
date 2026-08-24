@@ -10,9 +10,9 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck
+  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon
 } from 'lucide-react';
-import { useAuth } from './hooks/useAuth'; // <-- FECHADURA IMPORTADA AQUI
+import { useAuth } from './hooks/useAuth'; 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -25,7 +25,7 @@ interface Attendant { id: string; name: string; }
 interface Audit { rating: number | null; violatedPromptRules: boolean; knowledgeBaseFail: boolean; auditorFeedback: string; }
 interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
-interface MessageAudit { topicId?: string; subtopicId?: string; violatedPromptRules?: boolean; knowledgeBaseFail?: boolean; auditorFeedback?: string; clientQuestion?: string; }
+interface MessageAudit { topicId?: string; subtopicId?: string; violatedPromptRules?: boolean; knowledgeBaseFail?: boolean; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
 // ----------------
 
 const DYNAMIC_TAG_COLORS = [
@@ -131,8 +131,81 @@ function renderMessageContent(msg: any): string {
   return 'Mensagem enviada';
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractMediaUrl(msg: any): string | null {
+  if (!msg) return null;
+  if (typeof msg.content === 'string' && msg.content.startsWith('http')) return msg.content;
+  if (typeof msg.url === 'string') return msg.url;
+  if (typeof msg.mediaUrl === 'string') return msg.mediaUrl;
+  if (msg.content && typeof msg.content === 'object' && msg.content.url) return msg.content.url;
+  
+  try {
+    const str = JSON.stringify(msg);
+    const match = str.match(/(https:\/\/[^"]+\.amazonaws\.com[^"]+)/);
+    if (match) return match[0];
+  } catch {
+    // Ignora erros de JSON
+  }
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderMediaNode(msg: any) {
+  const type = (msg?.type || msg?.messageType || msg?.fileType || '').toString().toLowerCase();
+  const mediaUrl = extractMediaUrl(msg);
+  const textContent = renderMessageContent(msg);
+
+  if (type === 'image' || type === 'sticker' || (mediaUrl && textContent === '📷 Imagem')) {
+    return (
+      <div className="space-y-2">
+        {mediaUrl ? (
+          <a href={mediaUrl} target="_blank" rel="noopener noreferrer">
+            <img 
+              src={mediaUrl} 
+              alt="Mídia do Chat" 
+              className="max-w-xs max-h-64 rounded-xl border border-slate-700/50 object-cover cursor-pointer hover:opacity-80 transition-all shadow-sm" 
+            />
+          </a>
+        ) : (
+          <span className="flex items-center gap-2 bg-slate-900/50 p-2.5 rounded-lg border border-slate-700/50 text-xs">
+            <ImageIcon className="w-4 h-4 text-slate-400"/> Imagem indisponível
+          </span>
+        )}
+        {textContent && textContent !== '📷 Imagem' && <p className="whitespace-pre-wrap">{textContent}</p>}
+      </div>
+    );
+  }
+
+  if (type === 'audio' || (mediaUrl && textContent === '🎤 Áudio')) {
+    return (
+      <div className="space-y-2 min-w-[250px] max-w-sm">
+        {mediaUrl ? (
+          <div className="flex flex-col gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-700/50 shadow-inner">
+            <audio controls src={mediaUrl} className="w-full h-10 outline-none" />
+            <a 
+              href={mediaUrl} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              download 
+              className="text-[10px] text-slate-400 hover:text-blue-300 transition-colors underline text-center block" 
+            >
+              Baixar arquivo original
+            </a>
+          </div>
+        ) : (
+          <span className="flex items-center gap-2 bg-slate-900/50 p-2.5 rounded-lg border border-slate-700/50 text-xs">
+            🎤 Áudio indisponível
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return <div className="whitespace-pre-wrap leading-relaxed">{textContent}</div>;
+}
+
 export default function AuditDashboard() {
-  const isAuthorized = useAuth(); // <-- O SISTEMA CHAMA A FECHADURA AQUI PARA TRANCAR A TELA
+  const isAuthorized = useAuth();
 
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [searchTerm, setSearchTerm] = useState('');
@@ -169,6 +242,7 @@ export default function AuditDashboard() {
   const [msgFeedback, setMsgFeedback] = useState('');
   const [msgClientQuestion, setMsgClientQuestion] = useState('');
   const [msgTrainAi, setMsgTrainAi] = useState(false);
+  const [msgTargetModule, setMsgTargetModule] = useState('');
   const [msgQaQuestion, setMsgQaQuestion] = useState('');
   const [msgQaAnswer, setMsgQaAnswer] = useState('');
 
@@ -179,6 +253,7 @@ export default function AuditDashboard() {
   const activeAttendantId = selectedAttendantId || agapeMemberId || '';
 
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
+  const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -311,6 +386,7 @@ export default function AuditDashboard() {
       setMsgKbFail(Boolean(existing.knowledgeBaseFail));
       setMsgFeedback(existing.auditorFeedback || '');
       setMsgClientQuestion(existing.clientQuestion || '');
+      setMsgTargetModule(existing.targetModule || '');
     } else {
       setMsgTopicId('');
       setMsgSubtopicId('');
@@ -318,6 +394,7 @@ export default function AuditDashboard() {
       setMsgKbFail(false);
       setMsgFeedback('');
       setMsgClientQuestion(findPrecedingClientQuestion(index));
+      setMsgTargetModule('');
     }
     setMsgTrainAi(false);
     setMsgQaQuestion('');
@@ -338,6 +415,7 @@ export default function AuditDashboard() {
       knowledgeBaseFail: msgKbFail,
       auditorFeedback: msgFeedback,
       trainAi: msgTrainAi,
+      targetModule: msgTargetModule || 'Módulo Geral',
       qaQuestion: msgQaQuestion,
       qaAnswer: msgQaAnswer,
       auditorEmail: 'auditor@prover.com.br',
@@ -376,9 +454,6 @@ export default function AuditDashboard() {
     await axios.delete(`${API_URL}/topics/${id}`);
     mutateTopics();
   };
-  if (!isAuthorized) {
-    return <div className="h-screen w-screen bg-slate-950 flex items-center justify-center"></div>;
-  }
 
   const handleAddSubtopic = async (topicId: string) => {
     if (!newSubtopicName.trim()) return;
@@ -401,6 +476,10 @@ export default function AuditDashboard() {
     mutateTopics();
   };
 
+  if (!isAuthorized) {
+    return <div className="h-screen w-screen bg-slate-950 flex items-center justify-center"></div>;
+  }
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
@@ -418,18 +497,25 @@ export default function AuditDashboard() {
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <Link
               href="/relatorios"
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
             >
-              <BarChart3 className="w-4 h-4" /> Relatórios
+              <BarChart3 className="w-3.5 h-3.5" /> Relatórios
+            </Link>
+            <Link
+              href="/base-conhecimento"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
+            >
+              <BookOpen className="w-3.5 h-3.5" /> Base .TXT
             </Link>
             <button
               onClick={() => setShowTopicsManager(true)}
-              className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all cursor-pointer shadow-sm"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all cursor-pointer shadow-sm"
+              title="Temas e Subtópicos"
             >
-              <Settings className="w-4 h-4" /> Temas
+              <Settings className="w-4 h-4" />
             </button>
           </div>
 
@@ -678,7 +764,7 @@ export default function AuditDashboard() {
                         <div
                           className="max-w-[80%] rounded-[1.25rem] px-5 py-3 text-sm shadow-sm relative group bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700/50"
                         >
-                          <p className="whitespace-pre-wrap leading-relaxed">{renderMessageContent(m)}</p>
+                          {renderMediaNode(m)}
                           <span className="block text-right text-[10px] opacity-60 font-mono mt-2">
                             {dateStr} {timeStr && `às ${timeStr}`}
                           </span>
@@ -702,9 +788,7 @@ export default function AuditDashboard() {
                               </span>
                             </div>
 
-                            <p className="whitespace-pre-wrap leading-relaxed">
-                              {renderMessageContent(m)}
-                            </p>
+                            {renderMediaNode(m)}
 
                             {isFromAgape && (
                               <button
@@ -844,7 +928,7 @@ export default function AuditDashboard() {
               <label className="block text-sm font-semibold text-slate-300 mb-1.5">Observações do Auditor</label>
               <textarea
                 value={msgFeedback}
-                onChange={(e) => setFeedback(e.target.value)}
+                onChange={(e) => setMsgFeedback(e.target.value)}
                 rows={4}
                 placeholder="Detalhe o que o Ágape fez de errado nesta resposta..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder-slate-500 custom-scrollbar"
@@ -864,6 +948,26 @@ export default function AuditDashboard() {
 
               {msgTrainAi && (
                 <div className="space-y-4 bg-slate-900/80 p-4 rounded-xl border border-slate-700/80 transition-all shadow-inner">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Módulo / TXT de Destino</label>
+                    <select
+                      value={msgTargetModule}
+                      onChange={(e) => setMsgTargetModule(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="">Selecione o arquivo .txt...</option>
+                      {availableModules.map((mod, idx) => (
+                        <option key={idx} value={mod}>{mod}</option>
+                      ))}
+                      {availableModules.length === 0 && (
+                        <>
+                          <option value="Módulo 1: Cadastros">Módulo 1: Cadastros</option>
+                          <option value="Módulo 4: Financeiro">Módulo 4: Financeiro</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Pergunta de Treino</label>
                     <input
