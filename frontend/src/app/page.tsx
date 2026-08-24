@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import useSWR from 'swr';
@@ -10,7 +10,7 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon
+  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
 
@@ -207,13 +207,17 @@ function renderMediaNode(msg: any) {
 export default function AuditDashboard() {
   const isAuthorized = useAuth();
 
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
-  const [statusTab, setStatusTab] = useState('finalizados');
+  const [statusTab, setStatusTab] = useState('abertos'); // Aba padrão
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
+  const [chatToHide, setChatToHide] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
@@ -278,6 +282,27 @@ export default function AuditDashboard() {
 
   useEffect(() => { document.title = 'Auditoria Ágape'; }, []);
 
+  // NOVO EFEITO: Controle de Scroll de Chat
+  useEffect(() => {
+    if (!selectedChat || loadingMessages || messages.length === 0) return;
+
+    const timer = setTimeout(() => {
+      const hasGeneralAudit = selectedChat.audit?.rating && selectedChat.audit.rating > 0;
+      const hasMsgAudits = selectedChat.hasMessageAudits || Object.keys(messageAudits).length > 0;
+
+      if (hasGeneralAudit || hasMsgAudits) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        if (messagesContainerRef.current) {
+          messagesContainerRef.current.scrollTop = 0;
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [messages, selectedChat, loadingMessages, messageAudits]);
+
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollHeight - scrollTop <= clientHeight + 50) {
@@ -332,6 +357,31 @@ export default function AuditDashboard() {
       setMessages([]);
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  const handleConfirmHide = async () => {
+    if (!chatToHide) return;
+    try {
+      await axios.post(`${API_URL}/chats/${chatToHide.id}/hide`);
+      toast.success('Chat ocultado! Movido para a aba Ocultos.');
+      if (selectedChat?.id === chatToHide.id) setSelectedChat(null);
+      setChatToHide(null);
+      mutateChats();
+    } catch {
+      toast.error('Erro ao ocultar o chat.');
+    }
+  };
+
+  const handleUnhideChat = async () => {
+    if (!selectedChat) return;
+    try {
+      await axios.post(`${API_URL}/chats/${selectedChat.id}/unhide`);
+      toast.success('Chat restaurado com sucesso!');
+      setSelectedChat(null);
+      mutateChats();
+    } catch {
+      toast.error('Erro ao restaurar o chat.');
     }
   };
 
@@ -484,6 +534,41 @@ export default function AuditDashboard() {
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
 
+      {chatToHide && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">Ocultar Chat de Teste</h3>
+                <p className="text-xs text-slate-400">Ele será movido para a aba Ocultos</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/50 p-4 rounded-xl border border-slate-800 font-medium">
+              Tem certeza que deseja ocultar a conversa com <strong className="text-white">&quot;{chatToHide.contactName}&quot;</strong>? Ela deixará de aparecer nos relatórios e nas listas principais.
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setChatToHide(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmHide}
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-600/20 transition-all cursor-pointer"
+              >
+                Sim, Ocultar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="w-[22rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
         
         <div className="p-5 border-b border-slate-800/80 space-y-4 bg-slate-900/40">
@@ -521,9 +606,9 @@ export default function AuditDashboard() {
 
           <div className="flex bg-slate-900/90 p-1.5 rounded-xl border border-slate-800/80 text-xs font-semibold justify-between">
             {[
-              { id: 'entrada', label: 'Entrada' },
-              { id: 'esperando', label: 'Esperando' },
+              { id: 'abertos', label: 'Entrada' },
               { id: 'finalizados', label: 'Finalizados' },
+              { id: 'ocultos', label: 'Ocultos' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -689,35 +774,58 @@ export default function AuditDashboard() {
                 </div>
               </div>
 
-              <button
-                onClick={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
-                title="Avaliar o atendimento como um todo (nota geral + observação)"
-                className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer shrink-0 ${
-                  selectedChat.audit
-                    ? 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white shadow-sm'
-                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
-                }`}
-              >
-                {selectedChat.audit?.rating && selectedChat.audit.rating > 0 ? (
-                  <>
-                    <Pencil className="w-3.5 h-3.5" />
-                    Editar avaliação ({selectedChat.audit.rating}★)
-                  </>
-                ) : selectedChat.audit ? (
-                  <>
-                    <Pencil className="w-3.5 h-3.5" />
-                    Editar avaliação (Sem nota)
-                  </>
+              <div className="flex items-center gap-3">
+                {statusTab === 'ocultos' ? (
+                  <button
+                    onClick={handleUnhideChat}
+                    title="Restaurar este chat para a lista principal"
+                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer shadow-sm"
+                  >
+                    <Eye className="w-4 h-4" /> Desocultar
+                  </button>
                 ) : (
-                  <>
-                    <Star className="w-4 h-4" />
-                    Avaliar Atendimento
-                  </>
+                  <button
+                    onClick={() => setChatToHide(selectedChat)}
+                    title="Ocultar chat de teste"
+                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-slate-800/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-500/30 transition-all cursor-pointer shadow-sm"
+                  >
+                    <EyeOff className="w-4 h-4" />
+                  </button>
                 )}
-              </button>
+
+                <button
+                  onClick={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
+                  title="Avaliar o atendimento como um todo (nota geral + observação)"
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer shrink-0 ${
+                    selectedChat.audit
+                      ? 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white shadow-sm'
+                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
+                  }`}
+                >
+                  {selectedChat.audit?.rating && selectedChat.audit.rating > 0 ? (
+                    <>
+                      <Pencil className="w-3.5 h-3.5" />
+                      Editar avaliação ({selectedChat.audit.rating}★)
+                    </>
+                  ) : selectedChat.audit ? (
+                    <>
+                      <Pencil className="w-3.5 h-3.5" />
+                      Editar avaliação (Sem nota)
+                    </>
+                  ) : (
+                    <>
+                      <Star className="w-4 h-4" />
+                      Avaliar Atendimento
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 p-6 lg:p-8 overflow-y-auto space-y-5 bg-slate-900/30 custom-scrollbar">
+            <div 
+              ref={messagesContainerRef}
+              className="flex-1 p-6 lg:p-8 overflow-y-auto space-y-5 bg-slate-900/30 custom-scrollbar"
+            >
               {loadingMessages ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm gap-3">
                   <Clock className="w-8 h-8 animate-spin text-blue-500" />
@@ -812,6 +920,8 @@ export default function AuditDashboard() {
                   );
                 })
               )}
+              {/* Ref para o final da tela */}
+              <div ref={messagesEndRef} className="h-1" />
             </div>
           </>
         ) : (

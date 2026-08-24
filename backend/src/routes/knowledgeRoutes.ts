@@ -18,7 +18,7 @@ function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// 1. IMPORTAR ARQUIVO .TXT
+// 1. IMPORTAR ARQUIVO .TXT (AGORA USA O NOME DO ARQUIVO COMO MÓDULO)
 router.post('/upload-txt', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
@@ -26,7 +26,10 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     const textContent = req.file.buffer.toString('utf-8');
     const lines = textContent.split('\n');
 
-    let currentModule = 'Módulo Geral';
+    // O NOME DO MÓDULO AGORA É EXATAMENTE O NOME DO ARQUIVO UPLOADADO (sem o .txt)
+    let currentModule = req.file.originalname.replace(/\.[^/.]+$/, "").trim();
+    if (!currentModule) currentModule = 'Módulo Geral';
+
     let currentSection = 'Geral';
     const itemsToSave = [];
 
@@ -34,8 +37,9 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
       const trimmed = line.trim();
       if (!trimmed) continue;
 
+      // Se achar um "Módulo" no meio do texto, vira Seção para não quebrar o card isolado
       if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo')) {
-        currentModule = trimmed.replace(/^#+\s*/, '');
+        currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
 
@@ -72,8 +76,8 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     const db = await getDb();
 
     if (itemsToSave.length > 0) {
-      const modulesInFile = [...new Set(itemsToSave.map(i => i.module))];
-      await db.collection('knowledge').deleteMany({ module: { $in: modulesInFile } });
+      // Deleta apenas os itens que tem esse exato nome de arquivo, evitando apagar a base inteira
+      await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
     }
 
@@ -93,7 +97,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     if (!textContent) return res.status(400).json({ error: 'Conteúdo vazio.' });
 
     const lines = textContent.split('\n');
-    let currentModule = moduleName;
+    const currentModule = moduleName;
     let currentSection = 'Geral';
     const itemsToSave = [];
 
@@ -102,7 +106,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
       if (!trimmed) continue;
 
       if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo')) {
-        currentModule = trimmed.replace(/^#+\s*/, '');
+        currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
 
@@ -161,20 +165,13 @@ router.get('/export-txt', async (req: Request, res: Response) => {
     if (items.length === 0) return res.status(404).json({ error: 'Nenhum dado encontrado.' });
 
     let txtOutput = '';
-    let lastModule = '';
     let lastSection = '';
 
     for (const item of items) {
-      if (item.module !== lastModule) {
-        txtOutput += `${item.module}\n\n`;
-        lastModule = item.module;
-      }
-
       if (item.section && item.section !== lastSection) {
         txtOutput += `\n## ${item.section}\n`;
         lastSection = item.section;
       }
-
       txtOutput += `* ${item.title}: ${item.content}\n`;
     }
 

@@ -85,18 +85,34 @@ app.get('/api/chats', async (req, res) => {
     const { carteira, search, attendantId, status } = req.query;
     const db = await getDb();
     
+    // Busca os chats ocultados para remover ou mostrar dependendo da aba
+    const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
+    const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
+
     const auditedList = await db.collection('audits').find({}, { projection: { _id: 0 } }).toArray();
     const messageAuditsList = await db.collection('messageAudits').find({}, { projection: { chatId: 1 } }).toArray();
     const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
 
     const targetStatus = status ? String(status).toLowerCase() : 'finalizados';
-    const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
+    
+    let chatsToProcess: any[] = [];
 
-    const { items: umblerChats } = await UmblerService.getChats({
-      chatState,
-      memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined,
-    });
-    const chatsToProcess = umblerChats || [];
+    // Se for a aba de ocultos, busca abertos e fechados da API e filtra SÓ os ocultos
+    if (targetStatus === 'ocultos') {
+      const [{ items: openChats }, { items: closedChats }] = await Promise.all([
+        UmblerService.getChats({ chatState: 'Open', memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined }),
+        UmblerService.getChats({ chatState: 'Closed', memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined })
+      ]);
+      chatsToProcess = [...(openChats || []), ...(closedChats || [])].filter((chat: any) => hiddenChatsSet.has(chat.id));
+    } else {
+      // Senão, é a lógica normal, mas REMOVENDO os ocultos
+      const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
+      const { items: umblerChats } = await UmblerService.getChats({
+        chatState,
+        memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined,
+      });
+      chatsToProcess = (umblerChats || []).filter((chat: any) => !hiddenChatsSet.has(chat.id));
+    }
 
     const analyzedChats = chatsToProcess.map((chat: any) => {
       const audit = auditedList.find((a: any) => a.chatId === chat.id);
@@ -142,10 +158,10 @@ app.get('/api/chats', async (req, res) => {
     });
 
     let chats = analyzedChats;
-    if (targetStatus === 'esperando') {
-      chats = chats.filter((c: any) => c.chatStatus === 'waiting');
-    } else if (targetStatus === 'entrada') {
-      chats = chats.filter((c: any) => c.chatStatus !== 'waiting');
+    if (targetStatus === 'abertos') {
+      chats = chats.filter((c: any) => c.chatStatus !== 'closed');
+    } else if (targetStatus === 'finalizados') {
+      chats = chats.filter((c: any) => c.chatStatus === 'closed');
     }
     
     chats.sort((a: any, b: any) => {
@@ -167,6 +183,32 @@ app.get('/api/chats', async (req, res) => {
     }
 
     res.json({ total: chats.length, items: chats });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// NOVA ROTA: Ocultar chat
+app.post('/api/chats/:id/hide', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('hiddenChats').updateOne(
+      { chatId: req.params.id },
+      { $set: { chatId: req.params.id, hiddenAt: new Date().toISOString() } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// NOVA ROTA: Desocultar chat
+app.post('/api/chats/:id/unhide', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('hiddenChats').deleteOne({ chatId: req.params.id });
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
