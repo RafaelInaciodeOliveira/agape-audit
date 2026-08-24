@@ -12,6 +12,7 @@ import {
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
   ArrowLeft, BarChart3, Settings, ClipboardCheck
 } from 'lucide-react';
+import { useAuth } from './hooks/useAuth'; // <-- FECHADURA IMPORTADA AQUI
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -131,6 +132,8 @@ function renderMessageContent(msg: any): string {
 }
 
 export default function AuditDashboard() {
+  const isAuthorized = useAuth(); // <-- O SISTEMA CHAMA A FECHADURA AQUI PARA TRANCAR A TELA
+
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -373,6 +376,9 @@ export default function AuditDashboard() {
     await axios.delete(`${API_URL}/topics/${id}`);
     mutateTopics();
   };
+  if (!isAuthorized) {
+    return <div className="h-screen w-screen bg-slate-950 flex items-center justify-center"></div>;
+  }
 
   const handleAddSubtopic = async (topicId: string) => {
     if (!newSubtopicName.trim()) return;
@@ -540,8 +546,8 @@ export default function AuditDashboard() {
                       (() => {
                         const colors = getRatingColor(chat.audit!.rating);
                         return (
-                          <span className={`flex items-center justify-center font-black gap-1 px-2.5 py-0.5 rounded-md shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
-                            {chat.audit!.rating} <Star className={`w-3.5 h-3.5 ${colors.fill}`} />
+                          <span className={`flex items-center font-bold gap-1 px-2 py-0.5 rounded shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
+                            <Star className={`w-3 h-3 ${colors.fill}`} /> {chat.audit!.rating}★
                           </span>
                         );
                       })()
