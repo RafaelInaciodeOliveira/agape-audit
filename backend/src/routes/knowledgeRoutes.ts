@@ -18,32 +18,44 @@ function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// 1. IMPORTAR ARQUIVO .TXT (AGORA USA O NOME DO ARQUIVO COMO MÓDULO)
+// 1. IMPORTAR ARQUIVO DE CONHECIMENTO (.TXT, .JSON, .SWAGGER)
 router.post('/upload-txt', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
-    const textContent = req.file.buffer.toString('utf-8');
+    // Corrige os acentos no NOME do arquivo (Multer lê como latin1 por padrão)
+    let originalName = req.file.originalname;
+    try {
+      originalName = Buffer.from(originalName, 'latin1').toString('utf8');
+    } catch (e) {
+      console.log('Erro ao converter nome do arquivo', e);
+    }
+
+    const currentModule = originalName.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral';
+
+    // Força decodificação UTF-8 do CONTEÚDO para evitar caracteres corrompidos
+    let textContent = req.file.buffer.toString('utf-8');
+    
+    // Remove BOM se presente
+    if (textContent.charCodeAt(0) === 0xFEFF) {
+      textContent = textContent.slice(1);
+    }
+
     const lines = textContent.split('\n');
-
-    // O NOME DO MÓDULO AGORA É EXATAMENTE O NOME DO ARQUIVO UPLOADADO (sem o .txt)
-    let currentModule = req.file.originalname.replace(/\.[^/.]+$/, "").trim();
-    if (!currentModule) currentModule = 'Módulo Geral';
-
     let currentSection = 'Geral';
     const itemsToSave = [];
+    const nowIso = new Date().toISOString();
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      // Se achar um "Módulo" no meio do texto, vira Seção para não quebrar o card isolado
       if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo')) {
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
 
-      if (/^(##\s*)?\d+\.\d+\./.test(trimmed)) {
+      if (/^(##\s*)?\d+\.\d+\./.test(trimmed) || trimmed.startsWith('##')) {
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
@@ -67,28 +79,41 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
           title,
           content,
           source: 'upload_txt',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: nowIso,
+          updatedAt: nowIso
         });
       }
+    }
+
+    // Se o arquivo for muito técnico (ex: JSON/OpenAPI) e não gerar itens com '*', salva o bloco completo
+    if (itemsToSave.length === 0 && textContent.trim().length > 0) {
+      itemsToSave.push({
+        id: newId(),
+        module: currentModule,
+        section: 'Documentação Técnica / Especificação',
+        title: 'Estrutura Completa de Dados',
+        content: textContent.trim(),
+        source: 'upload_txt_raw',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
     }
 
     const db = await getDb();
 
     if (itemsToSave.length > 0) {
-      // Deleta apenas os itens que tem esse exato nome de arquivo, evitando apagar a base inteira
       await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
     }
 
     return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length });
   } catch (error: any) {
-    console.error('Erro ao processar TXT:', error);
+    console.error('Erro ao processar arquivo:', error);
     return res.status(500).json({ error: error.message || 'Erro ao processar arquivo.' });
   }
 });
 
-// 2. SALVAR EDIÇÃO MANUAL DO .TXT EM LOTE
+// 2. SALVAR EDIÇÃO MANUAL
 router.put('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const { moduleName } = req.params;
@@ -96,8 +121,12 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
     if (!textContent) return res.status(400).json({ error: 'Conteúdo vazio.' });
 
+    const db = await getDb();
+    const existingItems = await db.collection('knowledge').find({ module: moduleName }).sort({ createdAt: 1 }).toArray();
+    const createdAt = existingItems.length > 0 && existingItems[0].createdAt ? existingItems[0].createdAt : new Date().toISOString();
+    const updatedAt = new Date().toISOString();
+
     const lines = textContent.split('\n');
-    const currentModule = moduleName;
     let currentSection = 'Geral';
     const itemsToSave = [];
 
@@ -105,12 +134,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo')) {
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-
-      if (/^(##\s*)?\d+\.\d+\./.test(trimmed)) {
+      if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo') || trimmed.startsWith('##')) {
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
@@ -129,18 +153,30 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
         itemsToSave.push({
           id: newId(),
-          module: currentModule,
+          module: moduleName,
           section: currentSection,
           title,
           content,
           source: 'manual',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt,
+          updatedAt
         });
       }
     }
 
-    const db = await getDb();
+    if (itemsToSave.length === 0 && textContent.trim().length > 0) {
+      itemsToSave.push({
+        id: newId(),
+        module: moduleName,
+        section: 'Documentação Técnica / Especificação',
+        title: 'Estrutura Completa de Dados',
+        content: textContent.trim(),
+        source: 'manual_raw',
+        createdAt,
+        updatedAt
+      });
+    }
+
     await db.collection('knowledge').deleteMany({ module: moduleName });
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').insertMany(itemsToSave);
@@ -168,6 +204,11 @@ router.get('/export-txt', async (req: Request, res: Response) => {
     let lastSection = '';
 
     for (const item of items) {
+      if (item.source?.includes('raw')) {
+        txtOutput += `${item.content}\n`;
+        continue;
+      }
+
       if (item.section && item.section !== lastSection) {
         txtOutput += `\n## ${item.section}\n`;
         lastSection = item.section;

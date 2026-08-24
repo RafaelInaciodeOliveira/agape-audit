@@ -7,16 +7,28 @@ import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
-  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle
+  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
+function formatDate(rawDate?: string) {
+  if (!rawDate) return 'Não informada';
+  try {
+    const d = new Date(rawDate);
+    if (isNaN(d.getTime())) return 'Não informada';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return 'Não informada';
+  }
+}
+
 export default function BaseConhecimentoPage() {
   const isAuthorized = useAuth();
   const [uploading, setUploading] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Estados para exclusão
   const [moduleToDelete, setModuleToDelete] = useState<string | null>(null);
@@ -47,7 +59,7 @@ export default function BaseConhecimentoPage() {
       mutate(`${API_URL}/knowledge/modules`);
       mutate(`${API_URL}/knowledge`);
     } catch {
-      toast.error('Erro ao importar arquivo .txt');
+      toast.error('Erro ao importar arquivo.');
     } finally {
       setUploading(false);
     }
@@ -73,16 +85,20 @@ export default function BaseConhecimentoPage() {
     }
   };
 
-  // Abrir editor com o texto montado no formato .txt
   const handleOpenEditor = (moduleName: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const moduleItems = items.filter((item: any) => item.module === moduleName);
     
-    let txtOutput = `${moduleName}\n\n`;
+    let txtOutput = '';
     let lastSection = '';
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     moduleItems.forEach((item: any) => {
+      if (item.source?.includes('raw')) {
+        txtOutput += `${item.content}\n`;
+        return;
+      }
+
       if (item.section && item.section !== lastSection) {
         txtOutput += `\n## ${item.section}\n`;
         lastSection = item.section;
@@ -90,11 +106,10 @@ export default function BaseConhecimentoPage() {
       txtOutput += `* ${item.title}: ${item.content}\n`;
     });
 
-    setEditText(txtOutput);
+    setEditText(txtOutput.trim());
     setEditingModule(moduleName);
   };
 
-  // Salvar alterações manuais do TXT
   const handleSaveEditor = async () => {
     if (!editingModule) return;
 
@@ -103,12 +118,12 @@ export default function BaseConhecimentoPage() {
       await axios.put(`${API_URL}/knowledge/module/${encodeURIComponent(editingModule)}`, {
         textContent: editText
       });
-      toast.success('Arquivo .txt atualizado com sucesso!');
+      toast.success('Arquivo atualizado com sucesso!');
       mutate(`${API_URL}/knowledge/modules`);
       mutate(`${API_URL}/knowledge`);
       setEditingModule(null);
     } catch {
-      toast.error('Erro ao salvar alterações do .txt');
+      toast.error('Erro ao salvar alterações.');
     } finally {
       setSavingEdit(false);
     }
@@ -126,7 +141,7 @@ export default function BaseConhecimentoPage() {
       }, index * 400);
     });
 
-    toast.info(`Baixando ${modules.length} arquivos .txt separadamente...`);
+    toast.info(`Baixando ${modules.length} arquivos separadamente...`);
   };
 
   return (
@@ -134,7 +149,7 @@ export default function BaseConhecimentoPage() {
       <Toaster theme="dark" position="top-right" richColors />
 
       <div className="max-w-6xl mx-auto space-y-8">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-6">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-6 flex-wrap gap-4">
           <div className="flex items-center gap-4">
             <Link 
               href="/" 
@@ -147,18 +162,36 @@ export default function BaseConhecimentoPage() {
                 <BookOpen className="w-6 h-6" /> Central da Base de Conhecimento
               </h1>
               <p className="text-xs text-slate-400 mt-1">
-                Gerencie, treine via auditorias e baixe os arquivos .txt prontos para a Umbler.
+                Gerencie, treine via auditorias e baixe os arquivos prontos para a Umbler.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* TOGGLE MODO DE VISUALIZAÇÃO */}
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                title="Visualização em Grade"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                title="Visualização em Lista"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+
             <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all">
               <Upload className="w-4 h-4" />
-              {uploading ? 'Importando...' : 'Subir Novo .TXT'}
+              {uploading ? 'Importando...' : 'Subir Novo Arquivo'}
               <input 
                 type="file" 
-                accept=".txt" 
+                accept=".txt,.json,.yaml,.yml" 
                 onChange={handleFileUpload} 
                 disabled={uploading}
                 className="hidden" 
@@ -170,22 +203,25 @@ export default function BaseConhecimentoPage() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-xs transition-all cursor-pointer"
             >
               <FolderDown className="w-4 h-4 text-emerald-400" />
-              Baixar Todos (.TXTs Individuais)
+              Baixar Todos
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {modules.length === 0 ? (
-            <div className="col-span-2 text-center p-12 bg-slate-900/40 rounded-3xl border border-slate-800/80 space-y-3">
-              <Database className="w-10 h-10 text-slate-600 mx-auto" />
-              <p className="text-slate-400 font-medium text-sm">Nenhum módulo cadastrado na base.</p>
-              <p className="text-slate-500 text-xs">Suba um arquivo .txt acima para começar.</p>
-            </div>
-          ) : (
-            modules.map((moduleName, i) => {
+        {modules.length === 0 ? (
+          <div className="text-center p-12 bg-slate-900/40 rounded-3xl border border-slate-800/80 space-y-3">
+            <Database className="w-10 h-10 text-slate-600 mx-auto" />
+            <p className="text-slate-400 font-medium text-sm">Nenhum módulo cadastrado na base.</p>
+            <p className="text-slate-500 text-xs">Suba um arquivo acima para começar.</p>
+          </div>
+        ) : viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {modules.map((moduleName, i) => {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const moduleItems = items.filter((item: any) => item.module === moduleName);
+              const createdAt = moduleItems[0]?.createdAt;
+              const updatedAt = moduleItems[0]?.updatedAt;
+              const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
 
               return (
                 <div 
@@ -193,19 +229,19 @@ export default function BaseConhecimentoPage() {
                   className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
                 >
                   <div>
-                    <div className="flex justify-between items-start mb-4">
+                    <div className="flex justify-between items-start mb-3">
                       <span className="p-2.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
                         <FileText className="w-5 h-5" />
                       </span>
                       
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
-                          {moduleItems.length} tópicos
+                          {moduleItems.length} tópico(s)
                         </span>
 
                         <button
                           onClick={() => handleOpenEditor(moduleName)}
-                          title="Editar conteúdo do .txt"
+                          title="Editar conteúdo"
                           className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                         >
                           <Pencil className="w-4 h-4" />
@@ -221,9 +257,20 @@ export default function BaseConhecimentoPage() {
                       </div>
                     </div>
 
-                    <h3 className="font-bold text-base text-slate-100 mb-2">{moduleName}</h3>
+                    <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
+                    
+                    {/* Exibição de Data da Importação / Modificação */}
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
+                      <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      {isModified ? (
+                        <span>Modificado em: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                      ) : (
+                        <span>Importado em: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                      )}
+                    </div>
+
                     <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                      Procedimentos e treinos de auditoria associados a este módulo.
+                      Procedimentos e especificações associadas a este módulo.
                     </p>
                   </div>
 
@@ -241,12 +288,69 @@ export default function BaseConhecimentoPage() {
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        ) : (
+          /* VISUALIZAÇÃO EM LISTA */
+          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
+            {modules.map((moduleName, i) => {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const moduleItems = items.filter((item: any) => item.module === moduleName);
+              const createdAt = moduleItems[0]?.createdAt;
+              const updatedAt = moduleItems[0]?.updatedAt;
+              const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+
+              return (
+                <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
+                      <FileText className="w-4 h-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
+                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
+                        <span>{moduleItems.length} tópico(s)</span>
+                        <span>•</span>
+                        {isModified ? (
+                          <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                        ) : (
+                          <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleDownloadModule(moduleName)}
+                      className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+                      title="Baixar .TXT"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenEditor(moduleName)}
+                      title="Editar conteúdo"
+                      className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setModuleToDelete(moduleName)}
+                      title="Excluir este módulo"
+                      className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* MODAL BONITO DE CONFIRMAÇÃO DE EXCLUSÃO */}
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
       {moduleToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
@@ -304,7 +408,7 @@ export default function BaseConhecimentoPage() {
 
             <div className="flex-1 p-6 bg-slate-950 flex flex-col">
               <label className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider font-mono">
-                Conteúdo Bruto (.TXT)
+                Conteúdo Bruto
               </label>
               <textarea
                 value={editText}
@@ -316,7 +420,7 @@ export default function BaseConhecimentoPage() {
 
             <div className="p-5 border-t border-slate-800 flex justify-between items-center bg-slate-900/50">
               <span className="text-xs text-slate-500 font-mono">
-                Respeite o formato `## Seção` e `* Título: Conteúdo`
+                Salva instantaneamente e mantém o controle de versão da data
               </span>
 
               <div className="flex gap-3">
