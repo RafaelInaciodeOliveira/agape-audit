@@ -10,7 +10,7 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX
+  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
 
@@ -210,12 +210,16 @@ export default function AuditDashboard() {
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Ref para o dropdown customizado
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false); // NOVO ESTADO
   const [statusTab, setStatusTab] = useState('abertos');
   
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -268,6 +272,17 @@ export default function AuditDashboard() {
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
   const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher);
+
+  // Fecha o dropdown se clicar fora dele
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -775,20 +790,58 @@ export default function AuditDashboard() {
           </div>
           
           <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 bg-blue-600/10 border border-blue-500/30 rounded-xl px-3 py-2 focus-within:border-blue-500 transition-all">
-              <Bot className="w-4 h-4 text-blue-400 shrink-0" />
-              <select
-                value={activeAttendantId}
-                onChange={(e) => setSelectedAttendantId(e.target.value)}
-                className="w-full bg-transparent text-sm font-semibold text-blue-300 outline-none cursor-pointer"
+            
+            {/* DROPDOWN CUSTOMIZADO DE ATENDENTES */}
+            <div className="flex-1 relative" ref={dropdownRef}>
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="w-full flex items-center justify-between gap-2 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 rounded-xl px-3 py-2.5 transition-all focus:outline-none cursor-pointer"
               >
-                <option value="TODOS" className="bg-slate-900 text-slate-200">Todos os atendentes</option>
-                {attendants.map((a: Attendant) => (
-                  <option key={a.id} value={a.id} className="bg-slate-900 text-slate-200">
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Bot className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span className="text-sm font-semibold text-blue-300 truncate">
+                    {activeAttendantId === 'TODOS' || activeAttendantId === ''
+                      ? 'Todos os atendentes' 
+                      : attendants.find(a => a.id === activeAttendantId)?.name || 'Todos os atendentes'}
+                  </span>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-blue-400 shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-100">
+                  <button
+                    onClick={() => { setSelectedAttendantId('TODOS'); setIsDropdownOpen(false); }}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                      activeAttendantId === 'TODOS' || activeAttendantId === '' ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+                    }`}
+                  >
+                    Todos os atendentes
+                    {(activeAttendantId === 'TODOS' || activeAttendantId === '') && <Check className="w-4 h-4 text-blue-400" />}
+                  </button>
+                  
+                  <div className="h-px bg-slate-800/80 my-1 mx-2"></div>
+                  
+                  {attendants.map((a: Attendant) => {
+                    const isSelected = activeAttendantId === a.id;
+                    return (
+                      <button
+                        key={a.id}
+                        onClick={() => { setSelectedAttendantId(a.id); setIsDropdownOpen(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                          isSelected ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                           {a.name.includes('Ágape') ? <Bot className="w-3.5 h-3.5 opacity-70 shrink-0" /> : <UserCheck className="w-3.5 h-3.5 opacity-70 shrink-0" />}
+                           <span className="truncate">{a.name}</span>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-blue-400 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             
             <button 

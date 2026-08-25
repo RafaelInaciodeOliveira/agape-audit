@@ -178,7 +178,7 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState(getToday());
 
   useEffect(() => {
-    document.title = 'Relatórios de BI · Auditoria Ágape';
+    document.title = 'Auditoria Ágape';
     const load = async () => {
       if (!startDate || !endDate) return;
 
