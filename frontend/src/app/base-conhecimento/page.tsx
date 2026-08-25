@@ -247,18 +247,22 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
-            <select
-              value={currentUploadKbId}
-              onChange={(e) => setUploadKbId(e.target.value)}
-              title="Base de conhecimento de destino do próximo upload"
-              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 outline-none cursor-pointer max-w-[220px]"
-            >
-              {umblerBases.map((kb) => (
-                <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
-                  {kbLabel(kb)}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
+                <Database className="w-3 h-3" /> Novo arquivo vai para:
+              </span>
+              <select
+                value={currentUploadKbId}
+                onChange={(e) => setUploadKbId(e.target.value)}
+                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer max-w-[220px]"
+              >
+                {umblerBases.map((kb) => (
+                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
+                    {kbLabel(kb)}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all">
               <Upload className="w-4 h-4" />
@@ -504,13 +508,13 @@ export default function BaseConhecimentoPage() {
             </div>
 
             <div className="px-6 pt-4">
-              <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider font-mono">
-                Base de Conhecimento (Umbler)
+              <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider font-mono">
+                <Database className="w-3.5 h-3.5 text-blue-400" /> Este arquivo pertence à base:
               </label>
               <select
                 value={editKbId}
                 onChange={(e) => setEditKbId(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 outline-none cursor-pointer"
+                className="w-full bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer"
               >
                 {umblerBases.map((kb) => (
                   <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
@@ -518,6 +522,9 @@ export default function BaseConhecimentoPage() {
                   </option>
                 ))}
               </select>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Trocar aqui e salvar move o arquivo de base na Umbler (remove da antiga, cria na nova).
+              </p>
             </div>
 
             <div className="flex-1 p-6 bg-slate-950 flex flex-col">
