@@ -23,7 +23,6 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
-    // Corrige os acentos no NOME do arquivo (Multer lê como latin1 por padrão)
     let originalName = req.file.originalname;
     try {
       originalName = Buffer.from(originalName, 'latin1').toString('utf8');
@@ -33,70 +32,88 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     const currentModule = originalName.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral';
 
-    // Força decodificação UTF-8 do CONTEÚDO para evitar caracteres corrompidos
     let textContent = req.file.buffer.toString('utf-8');
-    
-    // Remove BOM se presente
     if (textContent.charCodeAt(0) === 0xFEFF) {
       textContent = textContent.slice(1);
     }
 
     const lines = textContent.split('\n');
     let currentSection = 'Geral';
-    const itemsToSave = [];
+    let currentTitle = '';
+    let currentContent = '';
+    let hasStructuredItems = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const itemsToSave: any[] = [];
     const nowIso = new Date().toISOString();
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo')) {
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-
-      if (/^(##\s*)?\d+\.\d+\./.test(trimmed) || trimmed.startsWith('##')) {
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-
-      if (trimmed.startsWith('*')) {
-        const itemText = trimmed.substring(1).trim();
-        const colonIndex = itemText.indexOf(':');
-
-        let title = 'Instrução';
-        let content = itemText;
-
-        if (colonIndex !== -1) {
-          title = itemText.substring(0, colonIndex).trim();
-          content = itemText.substring(colonIndex + 1).trim();
-        }
-
+    // Função que empacota o bloco inteiro de texto e salva no card
+    function flushItem() {
+      if (currentTitle.trim() || currentContent.trim()) {
         itemsToSave.push({
           id: newId(),
           module: currentModule,
           section: currentSection,
-          title,
-          content,
+          title: currentTitle.trim() || 'Tópico',
+          content: currentContent.trim(),
           source: 'upload_txt',
           createdAt: nowIso,
           updatedAt: nowIso
         });
+        currentTitle = '';
+        currentContent = '';
       }
     }
 
-    // Se o arquivo for muito técnico (ex: JSON/OpenAPI) e não gerar itens com '*', salva o bloco completo
-    if (itemsToSave.length === 0 && textContent.trim().length > 0) {
-      itemsToSave.push({
-        id: newId(),
-        module: currentModule,
-        section: 'Documentação Técnica / Especificação',
-        title: 'Estrutura Completa de Dados',
-        content: textContent.trim(),
-        source: 'upload_txt_raw',
-        createdAt: nowIso,
-        updatedAt: nowIso
-      });
+    for (const line of lines) {
+      const trimmed = line.trim();
+      
+      // Preserva parágrafos vazios no meio do texto
+      if (!trimmed) {
+         if (currentContent) currentContent += '\n';
+         continue;
+      }
+
+      if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
+        flushItem();
+        currentSection = trimmed.replace(/^#+\s*/, '');
+        continue;
+      }
+
+      // Só cria uma Sessão se tiver ESPAÇO depois do ## (Ex: "## Geral").
+      // "##Etapa1." não tem espaço, então será salvo como texto normal do cliente!
+      if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
+        flushItem();
+        currentSection = trimmed.replace(/^#+\s*/, '');
+        continue;
+      }
+
+      // Sempre que acha um *, finaliza o bloco anterior e começa um novo
+      if (trimmed.startsWith('*')) {
+        hasStructuredItems = true;
+        flushItem();
+        const itemText = trimmed.substring(1).trim();
+        const colonIndex = itemText.indexOf(':');
+
+        if (colonIndex !== -1 && colonIndex < 120) {
+          currentTitle = itemText.substring(0, colonIndex).trim();
+          currentContent = itemText.substring(colonIndex + 1).trim() + '\n';
+        } else {
+          currentTitle = 'Instrução';
+          currentContent = itemText + '\n';
+        }
+        continue;
+      }
+
+      // Vai juntando todas as outras linhas ao conteúdo do card atual
+      currentContent += trimmed + '\n';
+    }
+    // Salva o último bloco no fim do loop
+    flushItem();
+
+    if (!hasStructuredItems && itemsToSave.length === 1) {
+      itemsToSave[0].section = 'Documentação Técnica / Especificação';
+      itemsToSave[0].title = 'Estrutura Completa de Dados';
+      itemsToSave[0].source = 'upload_txt_raw';
     }
 
     const db = await getDb();
@@ -128,53 +145,72 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
     const lines = textContent.split('\n');
     let currentSection = 'Geral';
-    const itemsToSave = [];
+    let currentTitle = '';
+    let currentContent = '';
+    let hasStructuredItems = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const itemsToSave: any[] = [];
+
+    function flushItem() {
+      if (currentTitle.trim() || currentContent.trim()) {
+        itemsToSave.push({
+          id: newId(),
+          module: moduleName,
+          section: currentSection,
+          title: currentTitle.trim() || 'Tópico',
+          content: currentContent.trim(),
+          source: 'manual',
+          createdAt,
+          updatedAt
+        });
+        currentTitle = '';
+        currentContent = '';
+      }
+    }
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) continue;
+      if (!trimmed) {
+         if (currentContent) currentContent += '\n';
+         continue;
+      }
 
-      if (trimmed.toLowerCase().startsWith('módulo') || trimmed.toLowerCase().startsWith('modulo') || trimmed.startsWith('##')) {
+      if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
+        flushItem();
+        currentSection = trimmed.replace(/^#+\s*/, '');
+        continue;
+      }
+
+      if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
+        flushItem();
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
 
       if (trimmed.startsWith('*')) {
+        hasStructuredItems = true;
+        flushItem();
         const itemText = trimmed.substring(1).trim();
         const colonIndex = itemText.indexOf(':');
 
-        let title = 'Instrução';
-        let content = itemText;
-
-        if (colonIndex !== -1) {
-          title = itemText.substring(0, colonIndex).trim();
-          content = itemText.substring(colonIndex + 1).trim();
+        if (colonIndex !== -1 && colonIndex < 120) {
+          currentTitle = itemText.substring(0, colonIndex).trim();
+          currentContent = itemText.substring(colonIndex + 1).trim() + '\n';
+        } else {
+          currentTitle = 'Instrução';
+          currentContent = itemText + '\n';
         }
-
-        itemsToSave.push({
-          id: newId(),
-          module: moduleName,
-          section: currentSection,
-          title,
-          content,
-          source: 'manual',
-          createdAt,
-          updatedAt
-        });
+        continue;
       }
-    }
 
-    if (itemsToSave.length === 0 && textContent.trim().length > 0) {
-      itemsToSave.push({
-        id: newId(),
-        module: moduleName,
-        section: 'Documentação Técnica / Especificação',
-        title: 'Estrutura Completa de Dados',
-        content: textContent.trim(),
-        source: 'manual_raw',
-        createdAt,
-        updatedAt
-      });
+      currentContent += trimmed + '\n';
+    }
+    flushItem();
+
+    if (!hasStructuredItems && itemsToSave.length === 1) {
+      itemsToSave[0].section = 'Documentação Técnica / Especificação';
+      itemsToSave[0].title = 'Estrutura Completa de Dados';
+      itemsToSave[0].source = 'manual_raw';
     }
 
     await db.collection('knowledge').deleteMany({ module: moduleName });
@@ -205,7 +241,7 @@ router.get('/export-txt', async (req: Request, res: Response) => {
 
     for (const item of items) {
       if (item.source?.includes('raw')) {
-        txtOutput += `${item.content}\n`;
+        txtOutput += `${item.content}\n\n`;
         continue;
       }
 
@@ -213,7 +249,9 @@ router.get('/export-txt', async (req: Request, res: Response) => {
         txtOutput += `\n## ${item.section}\n`;
         lastSection = item.section;
       }
-      txtOutput += `* ${item.title}: ${item.content}\n`;
+      
+      const titleFormat = item.title === 'Instrução' || item.title === 'Tópico' ? '' : `${item.title}: `;
+      txtOutput += `* ${titleFormat}${item.content}\n\n`;
     }
 
     const filename = moduleName 
@@ -222,7 +260,7 @@ router.get('/export-txt', async (req: Request, res: Response) => {
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.status(200).send(txtOutput);
+    return res.status(200).send(txtOutput.trim());
   } catch (error: any) {
     return res.status(500).json({ error: error.message || 'Erro ao exportar arquivo.' });
   }

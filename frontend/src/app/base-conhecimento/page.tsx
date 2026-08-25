@@ -14,6 +14,18 @@ import { useAuth } from '../hooks/useAuth';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
+// Criamos a Tipagem Exata para evitar os erros do TypeScript/ESLint
+interface KnowledgeItem {
+  id?: string;
+  module: string;
+  section?: string;
+  title: string;
+  content: string;
+  source?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 function formatDate(rawDate?: string) {
   if (!rawDate) return 'Não informada';
   try {
@@ -39,7 +51,8 @@ export default function BaseConhecimentoPage() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   const { data: modules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
-  const { data: items = [] } = useSWR(`${API_URL}/knowledge`, fetcher);
+  // Aplicamos a tipagem no SWR
+  const { data: items = [] } = useSWR<KnowledgeItem[]>(`${API_URL}/knowledge`, fetcher);
 
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
@@ -86,14 +99,12 @@ export default function BaseConhecimentoPage() {
   };
 
   const handleOpenEditor = (moduleName: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const moduleItems = items.filter((item: any) => item.module === moduleName);
+    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
     
     let txtOutput = '';
     let lastSection = '';
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    moduleItems.forEach((item: any) => {
+    moduleItems.forEach((item: KnowledgeItem) => {
       if (item.source?.includes('raw')) {
         txtOutput += `${item.content}\n`;
         return;
@@ -217,11 +228,11 @@ export default function BaseConhecimentoPage() {
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {modules.map((moduleName, i) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const moduleItems = items.filter((item: any) => item.module === moduleName);
+              const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
               const createdAt = moduleItems[0]?.createdAt;
               const updatedAt = moduleItems[0]?.updatedAt;
               const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+              const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
 
               return (
                 <div 
@@ -269,8 +280,8 @@ export default function BaseConhecimentoPage() {
                       )}
                     </div>
 
-                    <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                      Procedimentos e especificações associadas a este módulo.
+                    <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
+                      {previewText}
                     </p>
                   </div>
 
@@ -294,19 +305,19 @@ export default function BaseConhecimentoPage() {
           /* VISUALIZAÇÃO EM LISTA */
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
             {modules.map((moduleName, i) => {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const moduleItems = items.filter((item: any) => item.module === moduleName);
+              const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
               const createdAt = moduleItems[0]?.createdAt;
               const updatedAt = moduleItems[0]?.updatedAt;
               const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+              const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
 
               return (
                 <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
-                  <div className="flex items-center gap-4 min-w-0">
+                  <div className="flex items-center gap-4 min-w-0 flex-1">
                     <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
                       <FileText className="w-4 h-4" />
                     </span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
                       <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
                         <span>{moduleItems.length} tópico(s)</span>
@@ -317,6 +328,9 @@ export default function BaseConhecimentoPage() {
                           <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
                         )}
                       </div>
+                      <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
+                        {previewText}
+                      </p>
                     </div>
                   </div>
 
