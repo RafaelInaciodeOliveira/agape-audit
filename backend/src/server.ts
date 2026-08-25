@@ -374,7 +374,6 @@ app.post('/api/message-audits', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// NOVA LÓGICA DE DATAS NOS RELATÓRIOS
 app.get('/api/reports/themes', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -520,6 +519,7 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
+// LÓGICA DE EXPORTAÇÃO CSV MELHORADA: PONTO E VÍRGULA E DADOS COMPLETOS
 app.get('/api/reports/export', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -534,28 +534,71 @@ app.get('/api/reports/export', async (req, res) => {
     }
 
     const db = await getDb();
-    const [audits, topics, subtopics] = await Promise.all([
-      db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray(),
+    
+    // Busca as duas tabelas de auditoria para construir um relatório completo
+    const [messageAudits, chatAudits, topics, subtopics] = await Promise.all([
+      db.collection('messageAudits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
+      db.collection('audits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
       db.collection('topics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('subtopics').find({}, { projection: { _id: 0 } }).toArray(),
     ]);
+
     const topicById = new Map(topics.map((t: any) => [t.id, t.name]));
     const subtopicById = new Map(subtopics.map((s: any) => [s.id, s.name]));
+    
+    // Mapa para puxar o nome do cliente usando o ID do Chat
+    const chatAuditMap = new Map(chatAudits.map((c: any) => [c.chatId, c]));
 
+    // Novo cabeçalho humanizado e útil
     const header = [
-      'Chat ID', 'Mensagem ID', 'Pergunta do Cliente', 'Tópico', 'Subtópico',
-      'Violou Diretrizes', 'Falha na Base', 'Observação do Auditor',
-      'Gerou Q&A', 'Pergunta Treino', 'Resposta Treino', 'Auditor', 'Data',
+      'Data', 'Hora', 'Tipo de Auditoria', 'Cliente', 'Carteira', 'Nota Geral',
+      'Tópico', 'Subtópico', 'Pergunta do Cliente', 'Violou Diretrizes',
+      'Falha na Base', 'Observação / Feedback', 'Gerou Treino (Q&A)'
     ];
-    const lines = [header.map(toCsvCell).join(',')];
-    for (const r of audits as any[]) {
+
+    // O Excel BR exige separação por ponto e vírgula (;)
+    const lines = [header.map(toCsvCell).join(';')];
+
+    // 1. Exporta as Avaliações do Atendimento como um todo (Estrelas)
+    for (const r of chatAudits as any[]) {
+      const d = new Date(r.createdAt);
       lines.push([
-        r.chatId, r.messageId, r.clientQuestion,
-        r.topicId ? topicById.get(r.topicId) : '', r.subtopicId ? subtopicById.get(r.subtopicId) : '',
-        r.violatedPromptRules ? 'Sim' : 'Não', r.knowledgeBaseFail ? 'Sim' : 'Não', r.auditorFeedback,
-        r.generatedQa ? 'Sim' : 'Não', r.qaQuestion, r.qaAnswer, r.auditorEmail, r.createdAt,
-      ].map(toCsvCell).join(','));
+        d.toLocaleDateString('pt-BR'),
+        d.toLocaleTimeString('pt-BR'),
+        'Avaliação de Atendimento',
+        r.clientName || 'Desconhecido',
+        r.carteiraTag || '-',
+        r.rating ? `${r.rating} Estrelas` : 'Sem nota',
+        '-', '-', '-',
+        r.violatedPromptRules ? 'Sim' : 'Não',
+        r.knowledgeBaseFail ? 'Sim' : 'Não',
+        r.auditorFeedback || '-',
+        '-'
+      ].map(toCsvCell).join(';'));
     }
+
+    // 2. Exporta as Correções de Respostas Específicas
+    for (const r of messageAudits as any[]) {
+      const d = new Date(r.createdAt);
+      const chatInfo = chatAuditMap.get(r.chatId) || {};
+      
+      lines.push([
+        d.toLocaleDateString('pt-BR'),
+        d.toLocaleTimeString('pt-BR'),
+        'Correção de Resposta da IA',
+        chatInfo.clientName || 'Desconhecido',
+        chatInfo.carteiraTag || '-',
+        '-',
+        r.topicId ? topicById.get(r.topicId) : '-',
+        r.subtopicId ? subtopicById.get(r.subtopicId) : '-',
+        r.clientQuestion || '-',
+        r.violatedPromptRules ? 'Sim' : 'Não',
+        r.knowledgeBaseFail ? 'Sim' : 'Não',
+        r.auditorFeedback || '-',
+        r.generatedQa ? 'Sim' : 'Não'
+      ].map(toCsvCell).join(';'));
+    }
+
     const csv = '\uFEFF' + lines.join('\r\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

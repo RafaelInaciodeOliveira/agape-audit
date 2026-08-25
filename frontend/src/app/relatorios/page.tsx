@@ -31,6 +31,21 @@ interface ValueData {
 }
 interface StatCardProps { icon: LucideIcon; label: string; value: string | number; accent: string; }
 
+// --- Formatadores de Data BR ---
+function formatDayBR(isoStr: string) {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
+  return isoStr;
+}
+
+function formatFullDateBR(isoStr: string) {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return isoStr;
+}
+
 // --- Componentes ---
 function StatCard({ icon: Icon, label, value, accent }: StatCardProps) {
   return (
@@ -50,7 +65,7 @@ function StatCard({ icon: Icon, label, value, accent }: StatCardProps) {
 function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
   const max = Math.max(1, ...rows.map((r) => r.total));
   return (
-    <div className="space-y-4 mt-3 w-full">
+    <div className="space-y-4 mt-2 w-full">
       {rows.length === 0 && (
         <div className="py-8 text-center border border-dashed border-slate-800 rounded-xl w-full">
           <p className="text-sm text-slate-500">Nenhum dado auditado no período.</p>
@@ -61,8 +76,12 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
         const pct = (r.total / max) * 100;
         const kbFailPct = r.total > 0 ? (r.kbFailCount / r.total) * 100 : 0;
         
+        // LÓGICA INTELIGENTE: Se estiver da metade pra baixo, abre pra cima. Senão, abre pra baixo.
+        const isBottomHalf = i >= rows.length / 2;
+        const tooltipPositionClass = isBottomHalf ? "bottom-full mb-2.5" : "top-full mt-2.5";
+        
         return (
-          <div key={i} className="group relative w-full">
+          <div key={i} className="group relative w-full z-10 hover:z-50">
             <div className="flex justify-between items-baseline gap-3 text-xs mb-1.5">
               <span className="text-slate-300 font-semibold truncate min-w-0">{label}</span>
               <span className="text-slate-400 font-mono shrink-0 whitespace-nowrap">{r.total} audits</span>
@@ -74,8 +93,10 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
                 )}
               </div>
             </div>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max max-w-[16rem] bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex flex-col gap-1">
-              <span className="font-bold text-slate-100 border-b border-slate-600 pb-1 mb-1">{label}</span>
+            
+            {/* Tooltip com Direção Dinâmica */}
+            <div className={`absolute left-1/2 -translate-x-1/2 ${tooltipPositionClass} w-max max-w-[18rem] bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity flex flex-col gap-1 z-50`}>
+              <span className="font-bold text-slate-100 border-b border-slate-600 pb-1 mb-1 truncate">{label}</span>
               <span className="text-blue-300">• Total auditado: <span className="font-mono font-bold text-white">{r.total}</span></span>
               <span className="text-emerald-400">• Corretas: <span className="font-mono font-bold text-white">{r.total - r.kbFailCount}</span></span>
               {r.kbFailCount > 0 && <span className="text-red-400">• Falhas na Base: <span className="font-mono font-bold">{r.kbFailCount}</span></span>}
@@ -111,13 +132,15 @@ function DailyBarChart({ rows, failKey, colorClass = "bg-blue-600" }: { rows: Da
         const failPct = r.total > 0 ? (failCount / r.total) * 100 : 0;
         
         return (
-          <div key={i} className="relative flex flex-col items-center gap-2 shrink-0 w-12 group h-full justify-end z-10">
+          <div key={i} className="relative flex flex-col items-center gap-2 shrink-0 w-12 group h-full justify-end z-10 hover:z-50">
             <div className="w-full bg-slate-900 rounded-t border border-slate-700/50 relative flex flex-col justify-end transition-all group-hover:brightness-125 group-hover:border-slate-400" style={{ height: `${heightPct}%` }}>
               <div className={`${colorClass} w-full relative rounded-t`} style={{ height: '100%' }}>
                 {failPct > 0 && <div className="absolute bottom-0 left-0 w-full bg-red-500" style={{ height: `${failPct}%` }} />}
               </div>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 flex flex-col gap-1 items-center whitespace-nowrap">
-                <span className="font-bold border-b border-slate-600 pb-1 mb-1 w-full text-center text-slate-200">{r.day}</span>
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-max bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity flex flex-col gap-1 items-center whitespace-nowrap z-50">
+                <span className="font-bold border-b border-slate-600 pb-1 mb-1 w-full text-center text-slate-200">
+                  {formatFullDateBR(r.day)}
+                </span>
                 <span className="text-slate-300">Total Auditado: <span className="font-mono font-bold text-white">{r.total}</span></span>
                 {failKey && (
                   <>
@@ -128,7 +151,7 @@ function DailyBarChart({ rows, failKey, colorClass = "bg-blue-600" }: { rows: Da
               </div>
             </div>
             <span className="text-[10px] text-slate-400 font-mono whitespace-nowrap absolute -bottom-5">
-              {r.day?.slice(5).replace('-', '/')}
+              {formatDayBR(r.day)}
             </span>
           </div>
         );
