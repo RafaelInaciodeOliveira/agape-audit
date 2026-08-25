@@ -137,24 +137,42 @@ function DailyBarChart({ rows, failKey, colorClass = "bg-blue-600" }: { rows: Da
   );
 }
 
+// Funções utilitárias para buscar o dia 1 do mês e o dia atual
+const getFirstDayOfMonth = () => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+};
+const getToday = () => {
+  return new Date().toISOString().split('T')[0];
+};
+
 export default function ReportsPage() {
   const [themes, setThemes] = useState<ThemeRow[]>([]);
   const [quality, setQuality] = useState<QualityData | null>(null);
   const [value, setValue] = useState<ValueData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState('30'); 
+  
+  // Estado das Datas (Padrão: Dia 1 do mês atual até Hoje)
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth()); 
+  const [endDate, setEndDate] = useState(getToday());
 
   useEffect(() => {
     document.title = 'Relatórios de BI · Auditoria Ágape';
     const load = async () => {
+      // Evita requisição se as datas não estiverem preenchidas
+      if (!startDate || !endDate) return;
+
       setLoading(true);
       try {
         setError(null);
+        // Atualiza a URL para mandar as datas exatas
+        const urlParams = `?startDate=${startDate}&endDate=${endDate}`;
+        
         const [themesRes, qualityRes, valueRes] = await Promise.all([
-          axios.get(`${API_URL}/reports/themes?days=${period}`),
-          axios.get(`${API_URL}/reports/quality?days=${period}`),
-          axios.get(`${API_URL}/reports/value?days=${period}`),
+          axios.get(`${API_URL}/reports/themes${urlParams}`),
+          axios.get(`${API_URL}/reports/quality${urlParams}`),
+          axios.get(`${API_URL}/reports/value${urlParams}`),
         ]);
         setThemes(themesRes.data || []);
         setQuality(qualityRes.data);
@@ -166,8 +184,14 @@ export default function ReportsPage() {
         setLoading(false);
       }
     };
-    load();
-  }, [period]);
+    
+    // Pequeno delay pra evitar dezenas de chamadas enquanto a pessoa digita a data
+    const delayDebounceFn = setTimeout(() => {
+      load();
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [startDate, endDate]);
 
   const calculateConformity = () => {
     if (!quality || quality.totalAudited === 0) return '—';
@@ -185,7 +209,6 @@ export default function ReportsPage() {
     .sort((a, b) => b.errorRate - a.errorRate)
     .slice(0, 4);
 
-  // CORES CORRIGIDAS: Agora vai do verde (5) ao vermelho (1) perfeitamente
   const starColors = ['text-emerald-400', 'text-lime-400', 'text-amber-400', 'text-orange-500', 'text-red-500'];
   const starBgs = ['bg-emerald-400', 'bg-lime-400', 'bg-amber-400', 'bg-orange-500', 'bg-red-500'];
   const allStars = [5, 4, 3, 2, 1];
@@ -207,22 +230,32 @@ export default function ReportsPage() {
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-800 rounded-xl px-3 py-2.5 shadow-sm">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <select 
-              value={period} 
-              onChange={(e) => setPeriod(e.target.value)}
-              className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold"
-            >
-              <option value="7" className="bg-slate-900">Últimos 7 dias</option>
-              <option value="30" className="bg-slate-900">Últimos 30 dias</option>
-              <option value="all" className="bg-slate-900">Todo o período</option>
-            </select>
+        <div className="flex flex-wrap items-center gap-4">
+          
+          {/* SELETOR DE DATAS PERSONALIZADAS */}
+          <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 shadow-sm">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-400" />
+              <input 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]"
+              />
+            </div>
+            <span className="text-slate-600 text-xs font-bold uppercase">até</span>
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]"
+              />
+            </div>
           </div>
 
           <a
-            href={`${API_URL}/reports/export`}
+            href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}`}
             className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
           >
             <FileSpreadsheet className="w-4 h-4" /> Exportar (CSV)
@@ -337,7 +370,7 @@ export default function ReportsPage() {
             {/* ROW 4: NOVOS GRÁFICOS (NOTAS, MOTIVOS, CARTEIRAS) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
               
-              {/* ITEM 1: Distribuição de Notas - Ordem de Cores Corrigida */}
+              {/* ITEM 1: Distribuição de Notas */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">

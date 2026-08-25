@@ -188,7 +188,7 @@ app.get('/api/chats', async (req, res) => {
   }
 });
 
-// NOVA ROTA: Ocultar chat
+// ROTA: Ocultar chat
 app.post('/api/chats/:id/hide', async (req, res) => {
   try {
     const db = await getDb();
@@ -203,7 +203,7 @@ app.post('/api/chats/:id/hide', async (req, res) => {
   }
 });
 
-// NOVA ROTA: Desocultar chat
+// ROTA: Desocultar chat
 app.post('/api/chats/:id/unhide', async (req, res) => {
   try {
     const db = await getDb();
@@ -374,14 +374,18 @@ app.post('/api/message-audits', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// NOVA LÓGICA DE DATAS NOS RELATÓRIOS
 app.get('/api/reports/themes', async (req, res) => {
   try {
-    const { days } = req.query;
+    const { startDate, endDate } = req.query;
     let dateFilter: any = {};
-    if (days && days !== 'all') {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - parseInt(String(days), 10));
-      dateFilter = { createdAt: { $gte: cutoff.toISOString() } };
+    if (startDate && endDate) {
+      dateFilter = { 
+        createdAt: { 
+          $gte: `${startDate}T00:00:00.000Z`, 
+          $lte: `${endDate}T23:59:59.999Z` 
+        } 
+      };
     }
 
     const db = await getDb();
@@ -415,12 +419,15 @@ app.get('/api/reports/themes', async (req, res) => {
 
 app.get('/api/reports/quality', async (req, res) => {
   try {
-    const { days } = req.query;
+    const { startDate, endDate } = req.query;
     let dateFilter: any = {};
-    if (days && days !== 'all') {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - parseInt(String(days), 10));
-      dateFilter = { createdAt: { $gte: cutoff.toISOString() } };
+    if (startDate && endDate) {
+      dateFilter = { 
+        createdAt: { 
+          $gte: `${startDate}T00:00:00.000Z`, 
+          $lte: `${endDate}T23:59:59.999Z` 
+        } 
+      };
     }
 
     const db = await getDb();
@@ -464,12 +471,15 @@ app.get('/api/reports/quality', async (req, res) => {
 
 app.get('/api/reports/value', async (req, res) => {
   try {
-    const { days } = req.query;
+    const { startDate, endDate } = req.query;
     let dateFilter: any = {};
-    if (days && days !== 'all') {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - parseInt(String(days), 10));
-      dateFilter = { createdAt: { $gte: cutoff.toISOString() } };
+    if (startDate && endDate) {
+      dateFilter = { 
+        createdAt: { 
+          $gte: `${startDate}T00:00:00.000Z`, 
+          $lte: `${endDate}T23:59:59.999Z` 
+        } 
+      };
     }
 
     const db = await getDb();
@@ -510,11 +520,22 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-app.get('/api/reports/export', async (_req, res) => {
+app.get('/api/reports/export', async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    let dateFilter: any = {};
+    if (startDate && endDate) {
+      dateFilter = { 
+        createdAt: { 
+          $gte: `${startDate}T00:00:00.000Z`, 
+          $lte: `${endDate}T23:59:59.999Z` 
+        } 
+      };
+    }
+
     const db = await getDb();
     const [audits, topics, subtopics] = await Promise.all([
-      db.collection('messageAudits').find({}, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray(),
+      db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).sort({ createdAt: -1 }).toArray(),
       db.collection('topics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('subtopics').find({}, { projection: { _id: 0 } }).toArray(),
     ]);

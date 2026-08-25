@@ -10,7 +10,7 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle
+  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
 
@@ -216,6 +216,10 @@ export default function AuditDashboard() {
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
   const [statusTab, setStatusTab] = useState('abertos'); // Aba padrão
+  
+  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
+  
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -276,13 +280,62 @@ export default function AuditDashboard() {
     { refreshInterval: 15000 }
   );
 
-  const allChats: Chat[] = chatsData?.items || [];
-  const totalChats: number = chatsData?.total || 0;
-  const visibleChats = allChats.slice(0, displayedCount);
+  const activeChatMessagesUrl = selectedChat ? `${API_URL}/chats/${selectedChat.id}/messages` : null;
+  useSWR(
+    activeChatMessagesUrl,
+    fetcher,
+    { 
+      refreshInterval: 10000,
+      onSuccess: (data) => {
+        let msgsToRender: Message[] = [];
+        if (Array.isArray(data)) msgsToRender = data;
+        else if (data?.items) msgsToRender = data.items;
+        else if (data?.messages) msgsToRender = data.messages;
+        else if (data?.data) msgsToRender = data.data;
+
+        setMessages((prev) => {
+          if (prev.length > 0 && prev.length === msgsToRender.length) {
+            const prevLast = prev[prev.length - 1];
+            const newLast = msgsToRender[msgsToRender.length - 1];
+            if (prevLast?.id === newLast?.id) return prev;
+          }
+          return msgsToRender;
+        });
+      }
+    }
+  );
+
+  // --- NOVA LÓGICA DE FILTROS ROBUSTA ---
+  const toggleFilter = (val: number | 'pendente' | 'parcial') => {
+    setChatFilters(prev => 
+      prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]
+    );
+  };
+
+  const rawChats: Chat[] = chatsData?.items || [];
+  
+  const filteredChats = rawChats.filter(chat => {
+    if (chatFilters.length > 0) {
+      const hasRating = chat.audit && chat.audit.rating && chat.audit.rating > 0;
+      const isPartial = (chat.audit && !hasRating) || chat.hasMessageAudits;
+      
+      let cStatus: number | 'pendente' | 'parcial' = 'pendente';
+      if (hasRating) cStatus = chat.audit!.rating as number;
+      else if (isPartial) cStatus = 'parcial';
+
+      if (!chatFilters.includes(cStatus)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const totalChats: number = filteredChats.length;
+  const visibleChats = filteredChats.slice(0, displayedCount);
+  // ----------------------------------------------
 
   useEffect(() => { document.title = 'Auditoria Ágape'; }, []);
 
-  // NOVO EFEITO: Controle de Scroll de Chat
   useEffect(() => {
     if (!selectedChat || loadingMessages || messages.length === 0) return;
 
@@ -302,11 +355,10 @@ export default function AuditDashboard() {
     return () => clearTimeout(timer);
   }, [messages, selectedChat, loadingMessages, messageAudits]);
 
-
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     if (scrollHeight - scrollTop <= clientHeight + 50) {
-      if (displayedCount < allChats.length) {
+      if (displayedCount < filteredChats.length) {
         setDisplayedCount((prev) => prev + 20);
       }
     }
@@ -569,6 +621,90 @@ export default function AuditDashboard() {
         </div>
       )}
 
+      {/* MODAL DE FILTROS AVANÇADOS - DESIGN MINIMALISTA */}
+      {showFiltersModal && (
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowFiltersModal(false)}
+        >
+          <div 
+            className="bg-slate-900 border border-slate-800 rounded-3xl p-7 max-w-sm w-full shadow-2xl space-y-6 animate-in fade-in zoom-in duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+              <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
+                <Filter className="w-5 h-5 text-blue-400" /> Filtros Avançados
+              </h3>
+              <button onClick={() => setShowFiltersModal(false)} className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              
+              {/* GRUPO 1: STATUS DO ATENDIMENTO */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Status do Atendimento</p>
+                
+                <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
+                  <input type="checkbox" className="hidden" checked={chatFilters.includes('pendente')} onChange={() => toggleFilter('pendente')} />
+                  <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('pendente') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
+                    {chatFilters.includes('pendente') && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                  </div>
+                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Pendente (Sem nota)</span>
+                </label>
+
+                <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
+                  <input type="checkbox" className="hidden" checked={chatFilters.includes('parcial')} onChange={() => toggleFilter('parcial')} />
+                  <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('parcial') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
+                    {chatFilters.includes('parcial') && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                  </div>
+                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Parcial (Apenas mensagens)</span>
+                </label>
+              </div>
+
+              <div className="h-px w-full bg-slate-800/80"></div>
+
+              {/* GRUPO 2: NOTA GERAL */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Nota Geral (Satisfação)</p>
+                
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const isChecked = chatFilters.includes(star);
+                  const colorObj = getRatingColor(star);
+                  return (
+                    <label key={star} className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
+                      <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleFilter(star)} />
+                      <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
+                        {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                      </div>
+                      <span className={`text-sm font-bold flex items-center gap-1.5 ${colorObj.text} transition-all select-none`}>
+                        {star} <Star className={`w-3.5 h-3.5 ${colorObj.fill}`} />
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4 border-t border-slate-800/80">
+              <button
+                onClick={() => setChatFilters([])}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800/50 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Limpar
+              </button>
+              <button
+                onClick={() => setShowFiltersModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+              >
+                Ver Resultados
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="w-[22rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
         
         <div className="p-5 border-b border-slate-800/80 space-y-4 bg-slate-900/40">
@@ -593,7 +729,7 @@ export default function AuditDashboard() {
               href="/base-conhecimento"
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
             >
-              <BookOpen className="w-3.5 h-3.5" /> Base .TXT
+              <BookOpen className="w-3.5 h-3.5" /> Base
             </Link>
             <button
               onClick={() => setShowTopicsManager(true)}
@@ -624,20 +760,37 @@ export default function AuditDashboard() {
             ))}
           </div>
           
-          <div className="flex items-center gap-2 bg-blue-600/10 border border-blue-500/30 rounded-xl px-3 py-2 focus-within:border-blue-500 transition-all">
-            <Bot className="w-4 h-4 text-blue-400 shrink-0" />
-            <select
-              value={activeAttendantId}
-              onChange={(e) => setSelectedAttendantId(e.target.value)}
-              className="w-full bg-transparent text-sm font-semibold text-blue-300 outline-none cursor-pointer"
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-blue-600/10 border border-blue-500/30 rounded-xl px-3 py-2 focus-within:border-blue-500 transition-all">
+              <Bot className="w-4 h-4 text-blue-400 shrink-0" />
+              <select
+                value={activeAttendantId}
+                onChange={(e) => setSelectedAttendantId(e.target.value)}
+                className="w-full bg-transparent text-sm font-semibold text-blue-300 outline-none cursor-pointer"
+              >
+                <option value="TODOS" className="bg-slate-900 text-slate-200">Todos os atendentes</option>
+                {attendants.map((a: Attendant) => (
+                  <option key={a.id} value={a.id} className="bg-slate-900 text-slate-200">
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <button 
+              onClick={() => setShowFiltersModal(true)} 
+              title="Filtros Avançados (Notas e Status)"
+              className={`p-2.5 rounded-xl border flex items-center justify-center transition-all cursor-pointer relative shrink-0 ${
+                chatFilters.length > 0 
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
+                  : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-blue-300 hover:border-blue-500/40'
+              }`}
             >
-              <option value="TODOS" className="bg-slate-900 text-slate-200">Todos os atendentes</option>
-              {attendants.map((a: Attendant) => (
-                <option key={a.id} value={a.id} className="bg-slate-900 text-slate-200">
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              <Filter className="w-4 h-4" />
+              {chatFilters.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-slate-950"></span>
+              )}
+            </button>
           </div>
 
           <div className="relative">
@@ -664,7 +817,7 @@ export default function AuditDashboard() {
           ) : visibleChats.length === 0 ? (
             <div className="p-10 text-center text-slate-500 space-y-1">
               <p className="font-semibold text-base text-slate-400">Nenhum chat encontrado</p>
-              <p className="text-xs opacity-70">Ajuste a busca ou filtro de carteira.</p>
+              <p className="text-xs opacity-70">Ajuste a busca ou filtros para ver mais.</p>
             </div>
           ) : (
             visibleChats.map((chat: Chat) => {
@@ -934,7 +1087,7 @@ export default function AuditDashboard() {
                 <BrainCircuit className="w-14 h-14 text-blue-400 animate-pulse" />
               </div>
 
-              <div className="absolute -top-2 -right-2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5">
+              <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
                 <Activity className="w-3 h-3 text-blue-400 animate-bounce" /> Sistema Ativo
               </div>
             </div>
