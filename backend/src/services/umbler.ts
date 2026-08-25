@@ -143,4 +143,54 @@ export const UmblerService = {
     await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`);
     return qaResponse.data;
   },
+
+  // Sincroniza um arquivo da base de conhecimento local com a Umbler:
+  // se já existir um documento com esse nome lá, apaga e recria (a API não tem "editar").
+  syncKnowledgeDocument: async (fileName: string, content: string) => {
+    const kbId = process.env.UMBLER_KB_ID;
+    const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
+
+    const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {
+      params: { organizationId },
+    });
+    const existing = (listResp.data?.items || []).find(
+      (d: any) => (d.fileName || '').replace(/^\.\//, '').trim().toLowerCase() === targetName
+    );
+    if (existing) {
+      await umblerApi.delete(`/v1/knowledge-bases/${kbId}/documents/${existing.id}/`, {
+        params: { organizationId },
+      });
+    }
+
+    const form = new FormData();
+    const blob = new Blob([content], { type: 'text/plain' });
+    form.append('Document', blob, fileName);
+    await umblerApi.post(`/v1/knowledge-bases/${kbId}/documents/`, form, {
+      params: { organizationId },
+      // A instância tem Content-Type: application/json fixo por padrão; precisa
+      // ser removido aqui pra o axios detectar o FormData e montar o multipart certo.
+      headers: { 'Content-Type': undefined },
+    });
+
+    await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`, {}, { params: { organizationId } });
+  },
+
+  // Remove da Umbler o documento correspondente a um arquivo apagado localmente
+  deleteKnowledgeDocument: async (fileName: string) => {
+    const kbId = process.env.UMBLER_KB_ID;
+    const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
+
+    const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {
+      params: { organizationId },
+    });
+    const existing = (listResp.data?.items || []).find(
+      (d: any) => (d.fileName || '').replace(/^\.\//, '').trim().toLowerCase() === targetName
+    );
+    if (existing) {
+      await umblerApi.delete(`/v1/knowledge-bases/${kbId}/documents/${existing.id}/`, {
+        params: { organizationId },
+      });
+      await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`, {}, { params: { organizationId } });
+    }
+  },
 };

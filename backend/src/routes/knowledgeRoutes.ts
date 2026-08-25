@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { MongoClient, Db } from 'mongodb';
+import { UmblerService } from '../services/umbler.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -16,6 +17,37 @@ async function getDb(): Promise<Db> {
 
 function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// Reconstrói o .txt a partir dos itens salvos (mesmo formato usado no export-txt)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildTxtFromItems(items: any[]): string {
+  let txtOutput = '';
+  let lastSection = '';
+  for (const item of items) {
+    if (item.source?.includes('raw')) {
+      txtOutput += `${item.content}\n\n`;
+      continue;
+    }
+    if (item.section && item.section !== lastSection) {
+      txtOutput += `\n## ${item.section}\n`;
+      lastSection = item.section;
+    }
+    const titleFormat = item.title === 'Instrução' || item.title === 'Tópico' ? '' : `${item.title}: `;
+    txtOutput += `* ${titleFormat}${item.content}\n\n`;
+  }
+  return txtOutput.trim();
+}
+
+// Sincroniza com a Umbler sem derrubar a resposta local se der erro
+async function syncModuleToUmbler(moduleName: string, content: string): Promise<boolean> {
+  try {
+    await UmblerService.syncKnowledgeDocument(`${moduleName}.txt`, content);
+    return true;
+  } catch (error: any) {
+    console.error(`Erro ao sincronizar "${moduleName}" com a Umbler:`, error.response?.data || error.message);
+    return false;
+  }
 }
 
 // 1. IMPORTAR ARQUIVO DE CONHECIMENTO (.TXT, .JSON, .SWAGGER)
@@ -118,12 +150,14 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     const db = await getDb();
 
+    let umblerSynced = false;
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
+      umblerSynced = await syncModuleToUmbler(currentModule, buildTxtFromItems(itemsToSave));
     }
 
-    return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length });
+    return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length, umblerSynced });
   } catch (error: any) {
     console.error('Erro ao processar arquivo:', error);
     return res.status(500).json({ error: error.message || 'Erro ao processar arquivo.' });
@@ -214,11 +248,13 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     }
 
     await db.collection('knowledge').deleteMany({ module: moduleName });
+    let umblerSynced = false;
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').insertMany(itemsToSave);
+      umblerSynced = await syncModuleToUmbler(moduleName, buildTxtFromItems(itemsToSave));
     }
 
-    return res.json({ success: true, totalItems: itemsToSave.length });
+    return res.json({ success: true, totalItems: itemsToSave.length, umblerSynced });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
@@ -236,25 +272,9 @@ router.get('/export-txt', async (req: Request, res: Response) => {
 
     if (items.length === 0) return res.status(404).json({ error: 'Nenhum dado encontrado.' });
 
-    let txtOutput = '';
-    let lastSection = '';
+    const txtOutput = buildTxtFromItems(items);
 
-    for (const item of items) {
-      if (item.source?.includes('raw')) {
-        txtOutput += `${item.content}\n\n`;
-        continue;
-      }
-
-      if (item.section && item.section !== lastSection) {
-        txtOutput += `\n## ${item.section}\n`;
-        lastSection = item.section;
-      }
-      
-      const titleFormat = item.title === 'Instrução' || item.title === 'Tópico' ? '' : `${item.title}: `;
-      txtOutput += `* ${titleFormat}${item.content}\n\n`;
-    }
-
-    const filename = moduleName 
+    const filename = moduleName
       ? `${moduleName.toLowerCase().replace(/[^a-z0-9]/g, '_')}_atualizado.txt` 
       : 'base_conhecimento_completa.txt';
 
@@ -271,7 +291,16 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
     await db.collection('knowledge').deleteMany({ module: req.params.moduleName });
-    return res.json({ success: true });
+
+    let umblerSynced = false;
+    try {
+      await UmblerService.deleteKnowledgeDocument(`${req.params.moduleName}.txt`);
+      umblerSynced = true;
+    } catch (error: any) {
+      console.error(`Erro ao remover "${req.params.moduleName}" da Umbler:`, error.response?.data || error.message);
+    }
+
+    return res.json({ success: true, umblerSynced });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
