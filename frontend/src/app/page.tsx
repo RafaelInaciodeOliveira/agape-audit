@@ -21,12 +21,12 @@ const fetcher = (url: string) => axios.get(url).then(res => res.data);
 // --- TIPAGENS ---
 interface Subtopic { id: string; name: string; }
 interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
-interface FailReason { id: string; name: string; } // NOVO: Tipagem para motivos de erro
+interface FailReason { id: string; name: string; }
 interface Attendant { id: string; name: string; }
-interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; } // ATUALIZADO
+interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; }
 interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
-interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; } // ATUALIZADO
+interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
 // ----------------
 
 const DYNAMIC_TAG_COLORS = [
@@ -227,12 +227,11 @@ export default function AuditDashboard() {
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   const [rating, setRating] = useState(0);
-  const [generalFailReasons, setGeneralFailReasons] = useState<string[]>([]); // NOVO: Array de motivos
+  const [generalFailReasons, setGeneralFailReasons] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
   
-  // MODAL DE CONFIGURAÇÕES (ANTIGA TEMAS)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'topics' | 'reasons'>('topics'); // NOVO: Controle de Abas
+  const [settingsTab, setSettingsTab] = useState<'topics' | 'reasons'>('topics');
   
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
@@ -242,7 +241,6 @@ export default function AuditDashboard() {
   const [editingSubtopicId, setEditingSubtopicId] = useState<string | null>(null);
   const [editingSubtopicName, setEditingSubtopicName] = useState('');
 
-  // ESTADOS PARA MOTIVOS DE ERRO
   const [newReasonName, setNewReasonName] = useState('');
   const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
   const [editingReasonName, setEditingReasonName] = useState('');
@@ -253,7 +251,7 @@ export default function AuditDashboard() {
 
   const [msgTopicId, setMsgTopicId] = useState('');
   const [msgSubtopicId, setMsgSubtopicId] = useState('');
-  const [msgFailReasons, setMsgFailReasons] = useState<string[]>([]); // NOVO: Array de motivos da mensagem
+  const [msgFailReasons, setMsgFailReasons] = useState<string[]>([]);
   const [msgFeedback, setMsgFeedback] = useState('');
   const [msgClientQuestion, setMsgClientQuestion] = useState('');
   const [msgTrainAi, setMsgTrainAi] = useState(false);
@@ -269,7 +267,7 @@ export default function AuditDashboard() {
 
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
-  const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher); // NOVO: Fetch dos motivos
+  const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher);
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -390,7 +388,7 @@ export default function AuditDashboard() {
 
     if (chat.audit) {
       setRating(chat.audit.rating || 0); 
-      setGeneralFailReasons(chat.audit.failReasons || []); // Carreaga motivos
+      setGeneralFailReasons(chat.audit.failReasons || []);
       setFeedback(chat.audit.auditorFeedback || '');
     } else {
       setRating(0);
@@ -464,7 +462,7 @@ export default function AuditDashboard() {
       clientName: selectedChat.contactName,
       carteiraTag: selectedChat.carteiraTag,
       rating: finalRating,
-      failReasons: generalFailReasons, // ENVIANDO ARRAY
+      failReasons: generalFailReasons,
       auditorFeedback: feedback,
       auditorEmail: 'auditor@prover.com.br',
     });
@@ -497,7 +495,7 @@ export default function AuditDashboard() {
     if (existing) {
       setMsgTopicId(existing.topicId || '');
       setMsgSubtopicId(existing.subtopicId || '');
-      setMsgFailReasons(existing.failReasons || []); // Carrega array
+      setMsgFailReasons(existing.failReasons || []);
       setMsgFeedback(existing.auditorFeedback || '');
       setMsgClientQuestion(existing.clientQuestion || '');
       setMsgTargetModule(existing.targetModule || '');
@@ -524,7 +522,7 @@ export default function AuditDashboard() {
       clientQuestion: msgClientQuestion,
       topicId: msgTopicId || null,
       subtopicId: msgSubtopicId || null,
-      failReasons: msgFailReasons, // ENVIANDO ARRAY
+      failReasons: msgFailReasons,
       auditorFeedback: msgFeedback,
       trainAi: msgTrainAi,
       targetModule: msgTargetModule || 'Módulo Geral',
@@ -646,7 +644,6 @@ export default function AuditDashboard() {
         </div>
       )}
 
-      {/* MODAL DE FILTROS AVANÇADOS */}
       {showFiltersModal && (
         <div 
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -1182,7 +1179,6 @@ export default function AuditDashboard() {
               </div>
             </div>
 
-            {/* --- NOVO: SELEÇÃO DINÂMICA DE MOTIVOS DE ERRO --- */}
             <div className="space-y-1 pt-4 border-t border-slate-800/80">
               <label className="block text-sm font-semibold text-slate-300 mb-2">Motivos de Falha / Observações</label>
               
@@ -1329,7 +1325,6 @@ export default function AuditDashboard() {
               </div>
             </div>
 
-            {/* --- NOVO: SELEÇÃO DINÂMICA DE MOTIVOS DE ERRO GERAL --- */}
             <div className="space-y-1 pt-4 border-t border-slate-800/80">
               <label className="block text-sm font-bold text-slate-300 mb-2">Motivos de Falha na Conversa</label>
               
@@ -1421,12 +1416,12 @@ export default function AuditDashboard() {
                           <span className="text-sm font-bold text-slate-200">{t.name}</span>
                         )}
                         <div className="flex items-center gap-1.5 shrink-0">
+                          <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
                           {editingTopicId === t.id ? (
                             <button onClick={() => handleRenameTopic(t.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"><CheckSquare className="w-4 h-4" /></button>
                           ) : (
                             <button onClick={() => { setEditingTopicId(t.id); setEditingTopicName(t.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Pencil className="w-4 h-4" /></button>
                           )}
-                          <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
                           <button onClick={() => handleDeleteTopic(t.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                         </div>
                       </div>

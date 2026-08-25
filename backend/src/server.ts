@@ -12,7 +12,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Conexão do Mongoose (Usado pela Base de Conhecimento)
 const mongoUri = process.env.MONGODB_URI || '';
 if (mongoUri) {
   mongoose.connect(mongoUri)
@@ -20,7 +19,6 @@ if (mongoUri) {
     .catch((err) => console.error('❌ Erro ao conectar Mongoose:', err));
 }
 
-// Rota da Central da Base de Conhecimento
 app.use('/api/knowledge', knowledgeRoutes);
 
 let dbInstance: Db | null = null;
@@ -66,7 +64,6 @@ async function initDb() {
     }
   }
 
-  // NOVO: Injeta os motivos de erro padrão caso não existam
   const existingReasons = await db.collection('failReasons').countDocuments();
   if (existingReasons === 0) {
     const DEFAULT_FAIL_REASONS = [
@@ -191,9 +188,7 @@ app.get('/api/chats', async (req, res) => {
     }
 
     res.json({ total: chats.length, items: chats });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/chats/:id/hide', async (req, res) => {
@@ -205,9 +200,7 @@ app.post('/api/chats/:id/hide', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/chats/:id/unhide', async (req, res) => {
@@ -215,9 +208,7 @@ app.post('/api/chats/:id/unhide', async (req, res) => {
     const db = await getDb();
     await db.collection('hiddenChats').deleteOne({ chatId: req.params.id });
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.get('/api/chats/:id/messages', async (req, res) => {
@@ -225,18 +216,14 @@ app.get('/api/chats/:id/messages', async (req, res) => {
     const { id } = req.params;
     const messages = await UmblerService.getChatMessages(id);
     res.json(messages);
-  } catch {
-    res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' });
-  }
+  } catch { res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' }); }
 });
 
-// NOVA LÓGICA: Salvar Array de motivos
 app.post('/api/audits', async (req, res) => {
   try {
     const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail } = req.body;
     const db = await getDb();
     
-    // Mantém a compatibilidade com gráficos antigos
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
 
@@ -260,9 +247,7 @@ app.post('/api/audits', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.get('/api/config', (_req, res) => {
@@ -273,7 +258,6 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
-// --- CRUD MOTIVOS DE ERRO (NOVO) ---
 app.get('/api/fail-reasons', async (_req, res) => {
   try {
     const db = await getDb();
@@ -308,7 +292,6 @@ app.delete('/api/fail-reasons/:id', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// --- CRUD TEMAS ---
 app.get('/api/topics', async (_req, res) => {
   try {
     const db = await getDb();
@@ -387,7 +370,6 @@ app.post('/api/message-audits', async (req, res) => {
     let generatedQa = 0;
     const db = await getDb();
 
-    // Mantém a compatibilidade com gráficos antigos
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
 
@@ -409,7 +391,6 @@ app.post('/api/message-audits', async (req, res) => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });
-
       generatedQa = 1;
     }
 
@@ -441,12 +422,7 @@ app.get('/api/reports/themes', async (req, res) => {
     const { startDate, endDate } = req.query;
     let dateFilter: any = {};
     if (startDate && endDate) {
-      dateFilter = { 
-        createdAt: { 
-          $gte: `${startDate}T00:00:00.000Z`, 
-          $lte: `${endDate}T23:59:59.999Z` 
-        } 
-      };
+      dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
     const db = await getDb();
@@ -478,23 +454,20 @@ app.get('/api/reports/themes', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// AQUI ESTÁ A MÁGICA: O SERVIDOR AGORA GERA O RANKING DINÂMICO DE MOTIVOS DE ERRO
 app.get('/api/reports/quality', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     let dateFilter: any = {};
     if (startDate && endDate) {
-      dateFilter = { 
-        createdAt: { 
-          $gte: `${startDate}T00:00:00.000Z`, 
-          $lte: `${endDate}T23:59:59.999Z` 
-        } 
-      };
+      dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
     const db = await getDb();
-    const [audits, chatAudits] = await Promise.all([
+    const [audits, chatAudits, allReasons] = await Promise.all([
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
+      db.collection('failReasons').find({}, { projection: { _id: 0 } }).toArray(),
     ]);
 
     const totalAudited = audits.length;
@@ -526,7 +499,32 @@ app.get('/api/reports/quality', async (req, res) => {
     }
     const byCarteira = Array.from(byCarteiraMap.values()).sort((a, b) => b.total - a.total);
 
-    res.json({ totalAudited, violatedCount, kbFailCount, avgRating, byDay, byCarteira });
+    // Lógica para Ranking Dinâmico de Motivos
+    const reasonMap = new Map(allReasons.map((r: any) => [r.id, r.name]));
+    const reasonCounts = new Map<string, number>();
+
+    const processReasons = (arr: any[]) => {
+      for (const item of arr) {
+         if (item.failReasons && Array.isArray(item.failReasons) && item.failReasons.length > 0) {
+           for (const rId of item.failReasons) {
+             reasonCounts.set(rId, (reasonCounts.get(rId) || 0) + 1);
+           }
+         } else {
+           // Resgate seguro para dados antigos (antes da atualização de hoje)
+           if (item.violatedPromptRules) reasonCounts.set('reason_violation', (reasonCounts.get('reason_violation') || 0) + 1);
+           if (item.knowledgeBaseFail) reasonCounts.set('reason_kb_fail', (reasonCounts.get('reason_kb_fail') || 0) + 1);
+         }
+      }
+    };
+
+    processReasons(audits);
+    processReasons(chatAudits);
+
+    const reasonsDistribution = Array.from(reasonCounts.entries())
+      .map(([id, count]) => ({ id, name: reasonMap.get(id) || id, count }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({ totalAudited, violatedCount, kbFailCount, avgRating, byDay, byCarteira, reasonsDistribution });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
@@ -535,12 +533,7 @@ app.get('/api/reports/value', async (req, res) => {
     const { startDate, endDate } = req.query;
     let dateFilter: any = {};
     if (startDate && endDate) {
-      dateFilter = { 
-        createdAt: { 
-          $gte: `${startDate}T00:00:00.000Z`, 
-          $lte: `${endDate}T23:59:59.999Z` 
-        } 
-      };
+      dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
     const db = await getDb();
@@ -586,12 +579,7 @@ app.get('/api/reports/export', async (req, res) => {
     const { startDate, endDate } = req.query;
     let dateFilter: any = {};
     if (startDate && endDate) {
-      dateFilter = { 
-        createdAt: { 
-          $gte: `${startDate}T00:00:00.000Z`, 
-          $lte: `${endDate}T23:59:59.999Z` 
-        } 
-      };
+      dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
     const db = await getDb();

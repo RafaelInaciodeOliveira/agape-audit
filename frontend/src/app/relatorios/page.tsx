@@ -23,6 +23,7 @@ interface QualityData {
   avgRating: string | number | null; 
   byDay: DailyRow[]; 
   byCarteira: CarteiraRow[];
+  reasonsDistribution?: { id: string, name: string, count: number }[]; // NOVO: Trazido pelo Backend
 }
 interface ValueData { 
   qaGenerated: number; 
@@ -65,7 +66,7 @@ function StatCard({ icon: Icon, label, value, accent }: StatCardProps) {
 function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
   const max = Math.max(1, ...rows.map((r) => r.total));
   return (
-    <div className="space-y-4 mt-2 w-full">
+    <div className="space-y-4 mt-2 w-full pb-16">
       {rows.length === 0 && (
         <div className="py-8 text-center border border-dashed border-slate-800 rounded-xl w-full">
           <p className="text-sm text-slate-500">Nenhum dado auditado no período.</p>
@@ -76,7 +77,6 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
         const pct = (r.total / max) * 100;
         const kbFailPct = r.total > 0 ? (r.kbFailCount / r.total) * 100 : 0;
         
-        // LÓGICA INTELIGENTE: Se estiver da metade pra baixo, abre pra cima. Senão, abre pra baixo.
         const isBottomHalf = i >= rows.length / 2;
         const tooltipPositionClass = isBottomHalf ? "bottom-full mb-2.5" : "top-full mt-2.5";
         
@@ -94,7 +94,6 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
               </div>
             </div>
             
-            {/* Tooltip com Direção Dinâmica */}
             <div className={`absolute left-1/2 -translate-x-1/2 ${tooltipPositionClass} w-max max-w-[18rem] bg-slate-800 border border-slate-700 text-white text-xs p-3 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity flex flex-col gap-1 z-50`}>
               <span className="font-bold text-slate-100 border-b border-slate-600 pb-1 mb-1 truncate">{label}</span>
               <span className="text-blue-300">• Total auditado: <span className="font-mono font-bold text-white">{r.total}</span></span>
@@ -160,7 +159,6 @@ function DailyBarChart({ rows, failKey, colorClass = "bg-blue-600" }: { rows: Da
   );
 }
 
-// Funções utilitárias para buscar o dia 1 do mês e o dia atual
 const getFirstDayOfMonth = () => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
@@ -176,20 +174,17 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Estado das Datas (Padrão: Dia 1 do mês atual até Hoje)
   const [startDate, setStartDate] = useState(getFirstDayOfMonth()); 
   const [endDate, setEndDate] = useState(getToday());
 
   useEffect(() => {
     document.title = 'Relatórios de BI · Auditoria Ágape';
     const load = async () => {
-      // Evita requisição se as datas não estiverem preenchidas
       if (!startDate || !endDate) return;
 
       setLoading(true);
       try {
         setError(null);
-        // Atualiza a URL para mandar as datas exatas
         const urlParams = `?startDate=${startDate}&endDate=${endDate}`;
         
         const [themesRes, qualityRes, valueRes] = await Promise.all([
@@ -208,7 +203,6 @@ export default function ReportsPage() {
       }
     };
     
-    // Pequeno delay pra evitar dezenas de chamadas enquanto a pessoa digita a data
     const delayDebounceFn = setTimeout(() => {
       load();
     }, 400);
@@ -221,10 +215,6 @@ export default function ReportsPage() {
     const correctAnswers = quality.totalAudited - quality.kbFailCount;
     return `${Math.round((correctAnswers / quality.totalAudited) * 100)}%`;
   };
-
-  const totalFails = (quality?.kbFailCount || 0) + (quality?.violatedCount || 0);
-  const kbFailPct = totalFails > 0 ? Math.round(((quality?.kbFailCount || 0) / totalFails) * 100) : 0;
-  const promptFailPct = totalFails > 0 ? Math.round(((quality?.violatedCount || 0) / totalFails) * 100) : 0;
 
   const bottlenecks = [...themes]
     .map(t => ({ ...t, errorRate: t.total > 0 ? t.kbFailCount / t.total : 0 }))
@@ -254,33 +244,17 @@ export default function ReportsPage() {
         </div>
         
         <div className="flex flex-wrap items-center gap-4">
-          
-          {/* SELETOR DE DATAS PERSONALIZADAS */}
           <div className="flex items-center gap-3 bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-2 shadow-sm">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-blue-400" />
-              <input 
-                type="date" 
-                value={startDate} 
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]"
-              />
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]" />
             </div>
             <span className="text-slate-600 text-xs font-bold uppercase">até</span>
             <div className="flex items-center gap-2">
-              <input 
-                type="date" 
-                value={endDate} 
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]"
-              />
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]" />
             </div>
           </div>
-
-          <a
-            href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}`}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
-          >
+          <a href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}`} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm">
             <FileSpreadsheet className="w-4 h-4" /> Exportar (CSV)
           </a>
         </div>
@@ -299,7 +273,6 @@ export default function ReportsPage() {
         ) : (
           <div className="flex flex-col gap-6 w-full">
             
-            {/* ROW 1: CARDS GERAIS */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
               <StatCard icon={ListChecks} label="Mensagens Revisadas" value={quality?.totalAudited ?? 0} accent="bg-blue-500/10 text-blue-400 border border-blue-500/20" />
               <StatCard icon={CheckCircle2} label="Taxa de Conformidade (IA)" value={calculateConformity()} accent="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" />
@@ -307,9 +280,7 @@ export default function ReportsPage() {
               <StatCard icon={GraduationCap} label="Treinamentos Realizados" value={value?.qaGenerated ?? 0} accent="bg-violet-500/10 text-violet-400 border border-violet-500/20" />
             </div>
 
-            {/* ROW 2: TEMAS (ESQUERDA) E GARGALOS (DIREITA) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
-              
               <div className="lg:col-span-2 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end mb-6 gap-4">
                   <div>
@@ -328,7 +299,6 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* ITEM 4: GARGALOS CRÍTICOS */}
               <div className="lg:col-span-1 bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -356,7 +326,6 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* ROW 3: DESEMPENHO E RITMO (Gráficos Verticais) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col w-full">
                 <div className="mb-2">
@@ -390,10 +359,8 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* ROW 4: NOVOS GRÁFICOS (NOTAS, MOTIVOS, CARTEIRAS) */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full">
               
-              {/* ITEM 1: Distribuição de Notas */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -421,51 +388,49 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* ITEM 2: Motivos de Falha */}
+              {/* ITEM 2: Motivos de Falha (RANKING DINÂMICO COMPLETAMENTE NOVO) */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                    <PieChart className="w-5 h-5 text-purple-400" /> Motivos de Erro
+                    <PieChart className="w-5 h-5 text-purple-400" /> Ranking de Falhas
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Comparativo de respostas incorretas vs violação de regras.</p>
+                  <p className="text-xs text-slate-500 mt-1">Os motivos de erro mais frequentes cometidos pela IA.</p>
                 </div>
-                <div className="flex-1 flex flex-col justify-center">
-                  {totalFails === 0 ? (
-                    <div className="text-center text-sm text-emerald-500 font-bold bg-emerald-500/10 py-6 rounded-xl border border-emerald-500/20">
+                <div className="flex-1 flex flex-col gap-3 overflow-y-auto custom-scrollbar pr-2 max-h-52">
+                  {(!quality?.reasonsDistribution || quality.reasonsDistribution.length === 0) ? (
+                    <div className="flex-1 flex items-center justify-center text-sm text-emerald-500 font-bold bg-emerald-500/10 py-6 rounded-xl border border-emerald-500/20">
                       Nenhuma falha detectada! 🎉
                     </div>
                   ) : (
-                    <>
-                      <div className="h-6 w-full bg-slate-950 rounded-lg overflow-hidden flex border border-slate-800 shadow-inner mb-6">
-                        <div className="h-full bg-red-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500" style={{ width: `${kbFailPct}%` }}>
-                          {kbFailPct > 15 ? `${kbFailPct}%` : ''}
-                        </div>
-                        <div className="h-full bg-purple-500 flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500" style={{ width: `${promptFailPct}%` }}>
-                          {promptFailPct > 15 ? `${promptFailPct}%` : ''}
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded bg-red-500 shadow-inner"></span>
-                            <span className="text-xs font-bold text-slate-300">Falta na Base de Conhecimento</span>
+                    quality.reasonsDistribution.map((r, i) => {
+                      const maxCount = quality.reasonsDistribution![0].count; // O primeiro sempre é o maior
+                      const pct = Math.max(2, (r.count / maxCount) * 100);
+                      
+                      return (
+                        <div key={r.id} className="relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-slate-600 transition-all">
+                          {/* Efeito "Water Level" (Background de progresso inline) */}
+                          <div className="absolute left-0 top-0 bottom-0 bg-purple-500/15 transition-all duration-1000" style={{ width: `${pct}%` }}></div>
+                          
+                          {/* Linha indicadora lateral neon */}
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
+
+                          <div className="flex items-center gap-3 z-10 pl-2 min-w-0">
+                            <div className="w-6 h-6 rounded bg-slate-900 border border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-400 shrink-0 shadow-inner group-hover:text-purple-400 group-hover:border-purple-500/50 transition-colors">
+                              {i + 1}º
+                            </div>
+                            <span className="text-xs font-bold text-slate-200 truncate" title={r.name}>{r.name}</span>
                           </div>
-                          <span className="text-sm font-mono font-bold text-red-400">{quality?.kbFailCount}</span>
-                        </div>
-                        <div className="flex justify-between items-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded bg-purple-500 shadow-inner"></span>
-                            <span className="text-xs font-bold text-slate-300">Violação de Prompt / Comportamento</span>
+                          <div className="z-10 flex items-center gap-1.5 shrink-0 pl-3">
+                            <span className="text-sm font-black text-white">{r.count}</span>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">falhas</span>
                           </div>
-                          <span className="text-sm font-mono font-bold text-purple-400">{quality?.violatedCount}</span>
                         </div>
-                      </div>
-                    </>
+                      );
+                    })
                   )}
                 </div>
               </div>
 
-              {/* ITEM 3: Desempenho por Carteira */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
