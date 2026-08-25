@@ -10,7 +10,7 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check
+  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
 
@@ -21,11 +21,12 @@ const fetcher = (url: string) => axios.get(url).then(res => res.data);
 // --- TIPAGENS ---
 interface Subtopic { id: string; name: string; }
 interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
+interface FailReason { id: string; name: string; } // NOVO: Tipagem para motivos de erro
 interface Attendant { id: string; name: string; }
-interface Audit { rating: number | null; violatedPromptRules: boolean; knowledgeBaseFail: boolean; auditorFeedback: string; }
+interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; } // ATUALIZADO
 interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
-interface MessageAudit { topicId?: string; subtopicId?: string; violatedPromptRules?: boolean; knowledgeBaseFail?: boolean; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
+interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; } // ATUALIZADO
 // ----------------
 
 const DYNAMIC_TAG_COLORS = [
@@ -215,7 +216,7 @@ export default function AuditDashboard() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
-  const [statusTab, setStatusTab] = useState('abertos'); // Aba padrão
+  const [statusTab, setStatusTab] = useState('abertos');
   
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
@@ -226,11 +227,13 @@ export default function AuditDashboard() {
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   const [rating, setRating] = useState(0);
-  const [violatedRules, setViolatedRules] = useState(false);
-  const [kbFail, setKbFail] = useState(false);
+  const [generalFailReasons, setGeneralFailReasons] = useState<string[]>([]); // NOVO: Array de motivos
   const [feedback, setFeedback] = useState('');
   
-  const [showTopicsManager, setShowTopicsManager] = useState(false);
+  // MODAL DE CONFIGURAÇÕES (ANTIGA TEMAS)
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'topics' | 'reasons'>('topics'); // NOVO: Controle de Abas
+  
   const [newTopicName, setNewTopicName] = useState('');
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [editingTopicName, setEditingTopicName] = useState('');
@@ -239,14 +242,18 @@ export default function AuditDashboard() {
   const [editingSubtopicId, setEditingSubtopicId] = useState<string | null>(null);
   const [editingSubtopicName, setEditingSubtopicName] = useState('');
 
+  // ESTADOS PARA MOTIVOS DE ERRO
+  const [newReasonName, setNewReasonName] = useState('');
+  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
+  const [editingReasonName, setEditingReasonName] = useState('');
+
   const [messageAudits, setMessageAudits] = useState<Record<string, MessageAudit>>({});
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [rightPanelMode, setRightPanelMode] = useState<'none' | 'chat' | 'message'>('none');
 
   const [msgTopicId, setMsgTopicId] = useState('');
   const [msgSubtopicId, setMsgSubtopicId] = useState('');
-  const [msgViolatedRules, setMsgViolatedRules] = useState(false);
-  const [msgKbFail, setMsgKbFail] = useState(false);
+  const [msgFailReasons, setMsgFailReasons] = useState<string[]>([]); // NOVO: Array de motivos da mensagem
   const [msgFeedback, setMsgFeedback] = useState('');
   const [msgClientQuestion, setMsgClientQuestion] = useState('');
   const [msgTrainAi, setMsgTrainAi] = useState(false);
@@ -262,6 +269,7 @@ export default function AuditDashboard() {
 
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
+  const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher); // NOVO: Fetch dos motivos
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -305,10 +313,21 @@ export default function AuditDashboard() {
     }
   );
 
-  // --- NOVA LÓGICA DE FILTROS ROBUSTA ---
   const toggleFilter = (val: number | 'pendente' | 'parcial') => {
     setChatFilters(prev => 
       prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]
+    );
+  };
+
+  const toggleMsgFailReason = (id: string) => {
+    setMsgFailReasons(prev => 
+      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+    );
+  };
+
+  const toggleGeneralFailReason = (id: string) => {
+    setGeneralFailReasons(prev => 
+      prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
     );
   };
 
@@ -332,7 +351,6 @@ export default function AuditDashboard() {
 
   const totalChats: number = filteredChats.length;
   const visibleChats = filteredChats.slice(0, displayedCount);
-  // ----------------------------------------------
 
   useEffect(() => { document.title = 'Auditoria Ágape'; }, []);
 
@@ -372,13 +390,11 @@ export default function AuditDashboard() {
 
     if (chat.audit) {
       setRating(chat.audit.rating || 0); 
-      setViolatedRules(Boolean(chat.audit.violatedPromptRules));
-      setKbFail(Boolean(chat.audit.knowledgeBaseFail));
+      setGeneralFailReasons(chat.audit.failReasons || []); // Carreaga motivos
       setFeedback(chat.audit.auditorFeedback || '');
     } else {
       setRating(0);
-      setViolatedRules(false);
-      setKbFail(false);
+      setGeneralFailReasons([]);
       setFeedback('');
     }
 
@@ -448,8 +464,7 @@ export default function AuditDashboard() {
       clientName: selectedChat.contactName,
       carteiraTag: selectedChat.carteiraTag,
       rating: finalRating,
-      violatedPromptRules: violatedRules,
-      knowledgeBaseFail: kbFail,
+      failReasons: generalFailReasons, // ENVIANDO ARRAY
       auditorFeedback: feedback,
       auditorEmail: 'auditor@prover.com.br',
     });
@@ -458,12 +473,10 @@ export default function AuditDashboard() {
       loading: 'Salvando auditoria...',
       success: () => {
         mutateChats(); 
-        
         setSelectedChat(prev => prev ? {
           ...prev, 
-          audit: { rating: finalRating, violatedPromptRules: violatedRules, knowledgeBaseFail: kbFail, auditorFeedback: feedback }
+          audit: { ...prev.audit, rating: finalRating, failReasons: generalFailReasons, auditorFeedback: feedback, violatedPromptRules: false, knowledgeBaseFail: false }
         } : null);
-        
         return 'Auditoria geral salva com sucesso!';
       },
       error: 'Erro ao salvar a auditoria.',
@@ -484,16 +497,14 @@ export default function AuditDashboard() {
     if (existing) {
       setMsgTopicId(existing.topicId || '');
       setMsgSubtopicId(existing.subtopicId || '');
-      setMsgViolatedRules(Boolean(existing.violatedPromptRules));
-      setMsgKbFail(Boolean(existing.knowledgeBaseFail));
+      setMsgFailReasons(existing.failReasons || []); // Carrega array
       setMsgFeedback(existing.auditorFeedback || '');
       setMsgClientQuestion(existing.clientQuestion || '');
       setMsgTargetModule(existing.targetModule || '');
     } else {
       setMsgTopicId('');
       setMsgSubtopicId('');
-      setMsgViolatedRules(false);
-      setMsgKbFail(false);
+      setMsgFailReasons([]);
       setMsgFeedback('');
       setMsgClientQuestion(findPrecedingClientQuestion(index));
       setMsgTargetModule('');
@@ -513,8 +524,7 @@ export default function AuditDashboard() {
       clientQuestion: msgClientQuestion,
       topicId: msgTopicId || null,
       subtopicId: msgSubtopicId || null,
-      violatedPromptRules: msgViolatedRules,
-      knowledgeBaseFail: msgKbFail,
+      failReasons: msgFailReasons, // ENVIANDO ARRAY
       auditorFeedback: msgFeedback,
       trainAi: msgTrainAi,
       targetModule: msgTargetModule || 'Módulo Geral',
@@ -537,26 +547,24 @@ export default function AuditDashboard() {
     });
   };
 
+  // --- CRUD TÓPICOS ---
   const handleAddTopic = async () => {
     if (!newTopicName.trim()) return;
     await axios.post(`${API_URL}/topics`, { name: newTopicName.trim() });
     setNewTopicName('');
     mutateTopics();
   };
-
   const handleRenameTopic = async (id: string) => {
     if (!editingTopicName.trim()) return;
     await axios.put(`${API_URL}/topics/${id}`, { name: editingTopicName.trim() });
     setEditingTopicId(null);
     mutateTopics();
   };
-
   const handleDeleteTopic = async (id: string) => {
     if (!confirm('Excluir este tópico e seus subtópicos?')) return;
     await axios.delete(`${API_URL}/topics/${id}`);
     mutateTopics();
   };
-
   const handleAddSubtopic = async (topicId: string) => {
     if (!newSubtopicName.trim()) return;
     await axios.post(`${API_URL}/topics/${topicId}/subtopics`, { name: newSubtopicName.trim() });
@@ -564,18 +572,35 @@ export default function AuditDashboard() {
     setAddingSubtopicTo(null);
     mutateTopics();
   };
-
   const handleRenameSubtopic = async (id: string) => {
     if (!editingSubtopicName.trim()) return;
     await axios.put(`${API_URL}/subtopics/${id}`, { name: editingSubtopicName.trim() });
     setEditingSubtopicId(null);
     mutateTopics();
   };
-
   const handleDeleteSubtopic = async (id: string) => {
     if (!confirm('Excluir este subtópico?')) return;
     await axios.delete(`${API_URL}/subtopics/${id}`);
     mutateTopics();
+  };
+
+  // --- CRUD MOTIVOS DE ERRO ---
+  const handleAddReason = async () => {
+    if (!newReasonName.trim()) return;
+    await axios.post(`${API_URL}/fail-reasons`, { name: newReasonName.trim() });
+    setNewReasonName('');
+    mutateFailReasons();
+  };
+  const handleRenameReason = async (id: string) => {
+    if (!editingReasonName.trim()) return;
+    await axios.put(`${API_URL}/fail-reasons/${id}`, { name: editingReasonName.trim() });
+    setEditingReasonId(null);
+    mutateFailReasons();
+  };
+  const handleDeleteReason = async (id: string) => {
+    if (!confirm('Excluir este motivo de erro permanentemente?')) return;
+    await axios.delete(`${API_URL}/fail-reasons/${id}`);
+    mutateFailReasons();
   };
 
   if (!isAuthorized) {
@@ -621,7 +646,7 @@ export default function AuditDashboard() {
         </div>
       )}
 
-      {/* MODAL DE FILTROS AVANÇADOS - DESIGN MINIMALISTA */}
+      {/* MODAL DE FILTROS AVANÇADOS */}
       {showFiltersModal && (
         <div 
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -641,11 +666,8 @@ export default function AuditDashboard() {
             </div>
 
             <div className="space-y-6">
-              
-              {/* GRUPO 1: STATUS DO ATENDIMENTO */}
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Status do Atendimento</p>
-                
                 <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
                   <input type="checkbox" className="hidden" checked={chatFilters.includes('pendente')} onChange={() => toggleFilter('pendente')} />
                   <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('pendente') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
@@ -653,7 +675,6 @@ export default function AuditDashboard() {
                   </div>
                   <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Pendente (Sem nota)</span>
                 </label>
-
                 <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
                   <input type="checkbox" className="hidden" checked={chatFilters.includes('parcial')} onChange={() => toggleFilter('parcial')} />
                   <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('parcial') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
@@ -662,13 +683,9 @@ export default function AuditDashboard() {
                   <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Parcial (Apenas mensagens)</span>
                 </label>
               </div>
-
               <div className="h-px w-full bg-slate-800/80"></div>
-
-              {/* GRUPO 2: NOTA GERAL */}
               <div className="space-y-2">
                 <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Nota Geral (Satisfação)</p>
-                
                 {[5, 4, 3, 2, 1].map((star) => {
                   const isChecked = chatFilters.includes(star);
                   const colorObj = getRatingColor(star);
@@ -732,9 +749,9 @@ export default function AuditDashboard() {
               <BookOpen className="w-3.5 h-3.5" /> Base
             </Link>
             <button
-              onClick={() => setShowTopicsManager(true)}
+              onClick={() => setShowSettingsModal(true)}
               className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all cursor-pointer shadow-sm"
-              title="Temas e Subtópicos"
+              title="Configurações (Temas e Motivos)"
             >
               <Settings className="w-4 h-4" />
             </button>
@@ -1165,34 +1182,36 @@ export default function AuditDashboard() {
               </div>
             </div>
 
-            <div className="space-y-3 pt-4 border-t border-slate-800/80">
-              <label className="flex items-start gap-3 cursor-pointer text-sm font-medium text-slate-200 bg-slate-900/50 p-3.5 rounded-xl border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800 transition-all">
-                <input
-                  type="checkbox"
-                  checked={msgViolatedRules}
-                  onChange={(e) => setMsgViolatedRules(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-600 mt-0.5 cursor-pointer"
-                />
-                <span className="leading-snug">Violou diretrizes? (ex: usou listas/menus, se reapresentou)</span>
-              </label>
-
-              <label className="flex items-start gap-3 cursor-pointer text-sm font-medium text-slate-200 bg-slate-900/50 p-3.5 rounded-xl border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800 transition-all">
-                <input
-                  type="checkbox"
-                  checked={msgKbFail}
-                  onChange={(e) => setMsgKbFail(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-600 mt-0.5 cursor-pointer"
-                />
-                <span className="leading-snug">Resposta Incorreta / Falta na Base</span>
-              </label>
+            {/* --- NOVO: SELEÇÃO DINÂMICA DE MOTIVOS DE ERRO --- */}
+            <div className="space-y-1 pt-4 border-t border-slate-800/80">
+              <label className="block text-sm font-semibold text-slate-300 mb-2">Motivos de Falha / Observações</label>
+              
+              {failReasons.length === 0 && (
+                <span className="text-xs text-slate-500 block mb-2">Nenhum motivo configurado. Use a engrenagem no topo esquerdo para criar.</span>
+              )}
+              
+              {failReasons.map((reason) => {
+                const isChecked = msgFailReasons.includes(reason.id);
+                return (
+                  <label key={reason.id} className="flex items-start gap-3 cursor-pointer group p-3 -mx-3 rounded-xl hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700/50">
+                    <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleMsgFailReason(reason.id)} />
+                    <div className={`mt-0.5 w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
+                      {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                    </div>
+                    <span className={`text-sm leading-snug transition-colors select-none ${isChecked ? 'text-slate-100 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                      {reason.name}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1.5">Observações do Auditor</label>
+              <label className="block text-sm font-semibold text-slate-300 mb-1.5">Observações do Auditor (Opcional)</label>
               <textarea
                 value={msgFeedback}
                 onChange={(e) => setMsgFeedback(e.target.value)}
-                rows={4}
+                rows={3}
                 placeholder="Detalhe o que o Ágape fez de errado nesta resposta..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder-slate-500 custom-scrollbar"
               />
@@ -1310,30 +1329,28 @@ export default function AuditDashboard() {
               </div>
             </div>
 
-            <div className="space-y-3 pt-4 border-t border-slate-800/80">
-              <label className="block text-sm font-bold text-slate-300 mb-2">
-                Conformidade com o Prompt
-              </label>
+            {/* --- NOVO: SELEÇÃO DINÂMICA DE MOTIVOS DE ERRO GERAL --- */}
+            <div className="space-y-1 pt-4 border-t border-slate-800/80">
+              <label className="block text-sm font-bold text-slate-300 mb-2">Motivos de Falha na Conversa</label>
+              
+              {failReasons.length === 0 && (
+                <span className="text-xs text-slate-500 block mb-2">Nenhum motivo configurado. Use a engrenagem no topo esquerdo para criar.</span>
+              )}
 
-              <label className="flex items-start gap-3 cursor-pointer text-sm font-medium text-slate-200 bg-slate-900/50 p-3.5 rounded-xl border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800 transition-all">
-                <input
-                  type="checkbox"
-                  checked={violatedRules}
-                  onChange={(e) => setViolatedRules(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-600 mt-0.5 cursor-pointer"
-                />
-                <span className="leading-snug">Violou diretrizes em algum momento do atendimento?</span>
-              </label>
-
-              <label className="flex items-start gap-3 cursor-pointer text-sm font-medium text-slate-200 bg-slate-900/50 p-3.5 rounded-xl border border-slate-700/60 hover:border-slate-500 hover:bg-slate-800 transition-all">
-                <input
-                  type="checkbox"
-                  checked={kbFail}
-                  onChange={(e) => setKbFail(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-600 mt-0.5 cursor-pointer"
-                />
-                <span className="leading-snug">Teve resposta incorreta / falta na base em algum momento?</span>
-              </label>
+              {failReasons.map((reason) => {
+                const isChecked = generalFailReasons.includes(reason.id);
+                return (
+                  <label key={reason.id} className="flex items-start gap-3 cursor-pointer group p-3 -mx-3 rounded-xl hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700/50">
+                    <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleGeneralFailReason(reason.id)} />
+                    <div className={`mt-0.5 w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
+                      {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                    </div>
+                    <span className={`text-sm leading-snug transition-colors select-none ${isChecked ? 'text-slate-100 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
+                      {reason.name}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
 
             <div>
@@ -1359,123 +1376,132 @@ export default function AuditDashboard() {
         </div>
       )}
 
-      {/* MODAL DE TEMAS */}
-      {showTopicsManager && (
+      {/* --- MODAL DE CONFIGURAÇÕES: TEMAS E MOTIVOS --- */}
+      {showSettingsModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
           <div className="bg-slate-950 border border-slate-700 rounded-3xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             <div className="flex items-center justify-between p-5 border-b border-slate-800">
               <h3 className="text-base font-black flex items-center gap-2 text-slate-100">
-                <Tag className="w-5 h-5 text-blue-400" /> Tópicos e Subtópicos
+                <Settings className="w-5 h-5 text-blue-400" /> Configurações Gerais
               </h3>
               <button
-                onClick={() => setShowTopicsManager(false)}
+                onClick={() => setShowSettingsModal(false)}
                 className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-              {topics.map((t: Topic) => (
-                <div key={t.id} className="bg-slate-900/60 border border-slate-700/60 rounded-2xl p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    {editingTopicId === t.id ? (
-                      <input
-                        autoFocus
-                        value={editingTopicName}
-                        onChange={(e) => setEditingTopicName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleRenameTopic(t.id)}
-                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-slate-100 outline-none focus:border-blue-500"
-                      />
-                    ) : (
-                      <span className="text-sm font-bold text-slate-200">{t.name}</span>
-                    )}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {editingTopicId === t.id ? (
-                        <button onClick={() => handleRenameTopic(t.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer">
-                          <CheckSquare className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <button onClick={() => { setEditingTopicId(t.id); setEditingTopicName(t.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer">
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer">
-                        <Plus className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDeleteTopic(t.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {(t.subtopics || []).length > 0 && (
-                    <div className="mt-3 pl-4 border-l-2 border-slate-800 space-y-2">
-                      {t.subtopics?.map((s: Subtopic) => (
-                        <div key={s.id} className="flex items-center justify-between gap-3">
-                          {editingSubtopicId === s.id ? (
-                            <input
-                              autoFocus
-                              value={editingSubtopicName}
-                              onChange={(e) => setEditingSubtopicName(e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && handleRenameSubtopic(s.id)}
-                              className="flex-1 bg-slate-950 border border-slate-700 rounded-md p-1.5 text-xs font-bold text-slate-200 outline-none focus:border-blue-500"
-                            />
-                          ) : (
-                            <span className="text-xs font-bold text-slate-400">{s.name}</span>
-                          )}
-                          <div className="flex items-center gap-1 shrink-0">
-                            {editingSubtopicId === s.id ? (
-                              <button onClick={() => handleRenameSubtopic(s.id)} className="p-1 text-emerald-400 hover:bg-slate-800 rounded-md cursor-pointer">
-                                <CheckSquare className="w-3.5 h-3.5" />
-                              </button>
-                            ) : (
-                              <button onClick={() => { setEditingSubtopicId(s.id); setEditingSubtopicName(s.name); }} className="p-1 text-slate-500 hover:text-blue-300 hover:bg-slate-800 rounded-md cursor-pointer">
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            <button onClick={() => handleDeleteSubtopic(s.id)} className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-md cursor-pointer">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {addingSubtopicTo === t.id && (
-                    <div className="mt-3 pl-4 flex items-center gap-2">
-                      <input
-                        autoFocus
-                        value={newSubtopicName}
-                        onChange={(e) => setNewSubtopicName(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic(t.id)}
-                        placeholder="Nome do subtópico"
-                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-200 outline-none focus:border-blue-500"
-                      />
-                      <button onClick={() => handleAddSubtopic(t.id)} className="p-1.5 text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer">
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+            {/* ABAS DA MODAL */}
+            <div className="flex bg-slate-900 border-b border-slate-800 p-2">
+              <button 
+                onClick={() => setSettingsTab('topics')} 
+                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all cursor-pointer ${settingsTab === 'topics' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                <Tag className="w-4 h-4 inline-block mr-1.5" /> Temas e Subtópicos
+              </button>
+              <button 
+                onClick={() => setSettingsTab('reasons')} 
+                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all cursor-pointer ${settingsTab === 'reasons' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                <ListX className="w-4 h-4 inline-block mr-1.5" /> Motivos de Erro
+              </button>
             </div>
 
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+              {/* CONTEÚDO DA ABA: TÓPICOS */}
+              {settingsTab === 'topics' && (
+                <>
+                  {topics.map((t: Topic) => (
+                    <div key={t.id} className="bg-slate-900/60 border border-slate-700/60 rounded-2xl p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        {editingTopicId === t.id ? (
+                          <input autoFocus value={editingTopicName} onChange={(e) => setEditingTopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameTopic(t.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-slate-100 outline-none focus:border-blue-500" />
+                        ) : (
+                          <span className="text-sm font-bold text-slate-200">{t.name}</span>
+                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {editingTopicId === t.id ? (
+                            <button onClick={() => handleRenameTopic(t.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"><CheckSquare className="w-4 h-4" /></button>
+                          ) : (
+                            <button onClick={() => { setEditingTopicId(t.id); setEditingTopicName(t.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Pencil className="w-4 h-4" /></button>
+                          )}
+                          <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
+                          <button onClick={() => handleDeleteTopic(t.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+
+                      {(t.subtopics || []).length > 0 && (
+                        <div className="mt-3 pl-4 border-l-2 border-slate-800 space-y-2">
+                          {t.subtopics?.map((s: Subtopic) => (
+                            <div key={s.id} className="flex items-center justify-between gap-3">
+                              {editingSubtopicId === s.id ? (
+                                <input autoFocus value={editingSubtopicName} onChange={(e) => setEditingSubtopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameSubtopic(s.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-md p-1.5 text-xs font-bold text-slate-200 outline-none focus:border-blue-500" />
+                              ) : (
+                                <span className="text-xs font-bold text-slate-400">{s.name}</span>
+                              )}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {editingSubtopicId === s.id ? (
+                                  <button onClick={() => handleRenameSubtopic(s.id)} className="p-1 text-emerald-400 hover:bg-slate-800 rounded-md cursor-pointer"><CheckSquare className="w-3.5 h-3.5" /></button>
+                                ) : (
+                                  <button onClick={() => { setEditingSubtopicId(s.id); setEditingSubtopicName(s.name); }} className="p-1 text-slate-500 hover:text-blue-300 hover:bg-slate-800 rounded-md cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                                )}
+                                <button onClick={() => handleDeleteSubtopic(s.id)} className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-md cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {addingSubtopicTo === t.id && (
+                        <div className="mt-3 pl-4 flex items-center gap-2">
+                          <input autoFocus value={newSubtopicName} onChange={(e) => setNewSubtopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic(t.id)} placeholder="Nome do subtópico" className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-200 outline-none focus:border-blue-500" />
+                          <button onClick={() => handleAddSubtopic(t.id)} className="p-1.5 text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* CONTEÚDO DA ABA: MOTIVOS DE ERRO */}
+              {settingsTab === 'reasons' && (
+                <>
+                  <p className="text-xs text-slate-400 mb-2">Crie as opções de erro que os auditores poderão marcar durante a avaliação de uma resposta ou do chat inteiro.</p>
+                  {failReasons.map((r: FailReason) => (
+                    <div key={r.id} className="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 flex items-center justify-between gap-3">
+                      {editingReasonId === r.id ? (
+                        <input autoFocus value={editingReasonName} onChange={(e) => setEditingReasonName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameReason(r.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-slate-100 outline-none focus:border-blue-500" />
+                      ) : (
+                        <span className="text-sm font-bold text-slate-200">{r.name}</span>
+                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {editingReasonId === r.id ? (
+                          <button onClick={() => handleRenameReason(r.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"><CheckSquare className="w-4 h-4" /></button>
+                        ) : (
+                          <button onClick={() => { setEditingReasonId(r.id); setEditingReasonName(r.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Pencil className="w-4 h-4" /></button>
+                        )}
+                        <button onClick={() => handleDeleteReason(r.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* RODAPÉ DA MODAL COM INPUT DINÂMICO */}
             <div className="p-5 border-t border-slate-800 flex items-center gap-3 bg-slate-900/50">
-              <input
-                value={newTopicName}
-                onChange={(e) => setNewTopicName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()}
-                placeholder="Adicionar novo tópico principal..."
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500"
-              />
-              <button
-                onClick={handleAddTopic}
-                className="p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white cursor-pointer transition-all shadow-sm shadow-blue-600/20"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
+              {settingsTab === 'topics' ? (
+                <>
+                  <input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()} placeholder="Adicionar novo tópico principal..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
+                  <button onClick={handleAddTopic} className="p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white cursor-pointer transition-all shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
+                </>
+              ) : (
+                <>
+                  <input value={newReasonName} onChange={(e) => setNewReasonName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddReason()} placeholder="Novo motivo de erro..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
+                  <button onClick={handleAddReason} className="p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white cursor-pointer transition-all shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
+                </>
+              )}
             </div>
           </div>
         </div>

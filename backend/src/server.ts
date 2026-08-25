@@ -65,6 +65,18 @@ async function initDb() {
       }
     }
   }
+
+  // NOVO: Injeta os motivos de erro padrão caso não existam
+  const existingReasons = await db.collection('failReasons').countDocuments();
+  if (existingReasons === 0) {
+    const DEFAULT_FAIL_REASONS = [
+      { id: 'reason_violation', name: 'Violou diretrizes (ex: usou menus, se reapresentou)' },
+      { id: 'reason_kb_fail', name: 'Resposta Incorreta / Falta na Base' }
+    ];
+    for (const fr of DEFAULT_FAIL_REASONS) {
+      await db.collection('failReasons').insertOne({ ...fr, createdAt: new Date().toISOString() });
+    }
+  }
 }
 initDb().catch((err) => console.error('Erro ao inicializar o MongoDB:', err.message));
 
@@ -85,7 +97,6 @@ app.get('/api/chats', async (req, res) => {
     const { carteira, search, attendantId, status } = req.query;
     const db = await getDb();
     
-    // Busca os chats ocultados para remover ou mostrar dependendo da aba
     const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
     const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
 
@@ -94,10 +105,8 @@ app.get('/api/chats', async (req, res) => {
     const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
 
     const targetStatus = status ? String(status).toLowerCase() : 'finalizados';
-    
     let chatsToProcess: any[] = [];
 
-    // Se for a aba de ocultos, busca abertos e fechados da API e filtra SÓ os ocultos
     if (targetStatus === 'ocultos') {
       const [{ items: openChats }, { items: closedChats }] = await Promise.all([
         UmblerService.getChats({ chatState: 'Open', memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined }),
@@ -105,7 +114,6 @@ app.get('/api/chats', async (req, res) => {
       ]);
       chatsToProcess = [...(openChats || []), ...(closedChats || [])].filter((chat: any) => hiddenChatsSet.has(chat.id));
     } else {
-      // Senão, é a lógica normal, mas REMOVENDO os ocultos
       const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
       const { items: umblerChats } = await UmblerService.getChats({
         chatState,
@@ -188,7 +196,6 @@ app.get('/api/chats', async (req, res) => {
   }
 });
 
-// ROTA: Ocultar chat
 app.post('/api/chats/:id/hide', async (req, res) => {
   try {
     const db = await getDb();
@@ -203,7 +210,6 @@ app.post('/api/chats/:id/hide', async (req, res) => {
   }
 });
 
-// ROTA: Desocultar chat
 app.post('/api/chats/:id/unhide', async (req, res) => {
   try {
     const db = await getDb();
@@ -224,17 +230,29 @@ app.get('/api/chats/:id/messages', async (req, res) => {
   }
 });
 
+// NOVA LÓGICA: Salvar Array de motivos
 app.post('/api/audits', async (req, res) => {
   try {
-    const { chatId, clientName, carteiraTag, rating, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail } = req.body;
+    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail } = req.body;
     const db = await getDb();
+    
+    // Mantém a compatibilidade com gráficos antigos
+    let isViolated = violatedPromptRules ? 1 : 0;
+    let isKbFail = knowledgeBaseFail ? 1 : 0;
+
+    if (Array.isArray(failReasons)) {
+       isViolated = failReasons.includes('reason_violation') ? 1 : 0;
+       isKbFail = failReasons.includes('reason_kb_fail') ? 1 : 0;
+    }
+
     await db.collection('audits').updateOne(
       { chatId },
       {
         $set: {
           chatId, clientName, carteiraTag, rating,
-          violatedPromptRules: violatedPromptRules ? 1 : 0,
-          knowledgeBaseFail: knowledgeBaseFail ? 1 : 0,
+          failReasons: failReasons || [],
+          violatedPromptRules: isViolated,
+          knowledgeBaseFail: isKbFail,
           auditorFeedback, auditorEmail, createdAt: new Date().toISOString(),
         },
         $setOnInsert: { id: newId() },
@@ -255,6 +273,42 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
+// --- CRUD MOTIVOS DE ERRO (NOVO) ---
+app.get('/api/fail-reasons', async (_req, res) => {
+  try {
+    const db = await getDb();
+    const reasons = await db.collection('failReasons').find({}, { projection: { _id: 0 } }).sort({ createdAt: 1 }).toArray();
+    res.json(reasons);
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/api/fail-reasons', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const db = await getDb();
+    const id = newId();
+    await db.collection('failReasons').insertOne({ id, name, createdAt: new Date().toISOString() });
+    res.json({ id, name });
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+app.put('/api/fail-reasons/:id', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('failReasons').updateOne({ id: req.params.id }, { $set: { name: req.body.name } });
+    res.json({ success: true });
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+app.delete('/api/fail-reasons/:id', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('failReasons').deleteOne({ id: req.params.id });
+    res.json({ success: true });
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
+});
+
+// --- CRUD TEMAS ---
 app.get('/api/topics', async (_req, res) => {
   try {
     const db = await getDb();
@@ -329,15 +383,22 @@ app.get('/api/chats/:id/message-audits', async (req, res) => {
 
 app.post('/api/message-audits', async (req, res) => {
   try {
-    const { chatId, messageId, clientQuestion, topicId, subtopicId, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = req.body;
+    const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = req.body;
     let generatedQa = 0;
-    
     const db = await getDb();
+
+    // Mantém a compatibilidade com gráficos antigos
+    let isViolated = violatedPromptRules ? 1 : 0;
+    let isKbFail = knowledgeBaseFail ? 1 : 0;
+
+    if (Array.isArray(failReasons)) {
+       isViolated = failReasons.includes('reason_violation') ? 1 : 0;
+       isKbFail = failReasons.includes('reason_kb_fail') ? 1 : 0;
+    }
 
     if (trainAi && qaQuestion && qaAnswer) {
       await UmblerService.createKnowledgeBaseQA(qaQuestion, qaAnswer);
       
-      // Injeta também na Central da Base de Conhecimento do módulo selecionado
       await db.collection('knowledge').insertOne({
         id: newId(),
         module: targetModule || 'Módulo Geral',
@@ -358,8 +419,9 @@ app.post('/api/message-audits', async (req, res) => {
         $set: {
           chatId, messageId, clientQuestion: clientQuestion || null,
           topicId: topicId || null, subtopicId: subtopicId || null,
-          violatedPromptRules: violatedPromptRules ? 1 : 0,
-          knowledgeBaseFail: knowledgeBaseFail ? 1 : 0,
+          failReasons: failReasons || [],
+          violatedPromptRules: isViolated,
+          knowledgeBaseFail: isKbFail,
           auditorFeedback, generatedQa,
           targetModule: targetModule || null,
           qaQuestion: generatedQa ? qaQuestion : null,
@@ -519,7 +581,6 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-// LÓGICA DE EXPORTAÇÃO CSV MELHORADA: PONTO E VÍRGULA E DADOS COMPLETOS
 app.get('/api/reports/export', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -535,31 +596,37 @@ app.get('/api/reports/export', async (req, res) => {
 
     const db = await getDb();
     
-    // Busca as duas tabelas de auditoria para construir um relatório completo
-    const [messageAudits, chatAudits, topics, subtopics] = await Promise.all([
+    const [messageAudits, chatAudits, topics, subtopics, failReasons] = await Promise.all([
       db.collection('messageAudits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
       db.collection('audits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
       db.collection('topics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('subtopics').find({}, { projection: { _id: 0 } }).toArray(),
+      db.collection('failReasons').find({}, { projection: { _id: 0 } }).toArray(),
     ]);
 
     const topicById = new Map(topics.map((t: any) => [t.id, t.name]));
     const subtopicById = new Map(subtopics.map((s: any) => [s.id, s.name]));
-    
-    // Mapa para puxar o nome do cliente usando o ID do Chat
+    const reasonById = new Map(failReasons.map((r: any) => [r.id, r.name]));
     const chatAuditMap = new Map(chatAudits.map((c: any) => [c.chatId, c]));
 
-    // Novo cabeçalho humanizado e útil
+    const formatReasons = (reasonsArr: string[], vRules: any, kbFail: any) => {
+      if (reasonsArr && reasonsArr.length > 0) {
+        return reasonsArr.map(id => reasonById.get(id) || id).join(', ');
+      }
+      let old = [];
+      if (vRules) old.push('Violou diretrizes');
+      if (kbFail) old.push('Falta na base');
+      return old.length > 0 ? old.join(', ') : '-';
+    };
+
     const header = [
       'Data', 'Hora', 'Tipo de Auditoria', 'Cliente', 'Carteira', 'Nota Geral',
-      'Tópico', 'Subtópico', 'Pergunta do Cliente', 'Violou Diretrizes',
-      'Falha na Base', 'Observação / Feedback', 'Gerou Treino (Q&A)'
+      'Tópico', 'Subtópico', 'Pergunta do Cliente', 'Motivos de Falha',
+      'Observação / Feedback', 'Gerou Treino (Q&A)'
     ];
 
-    // O Excel BR exige separação por ponto e vírgula (;)
     const lines = [header.map(toCsvCell).join(';')];
 
-    // 1. Exporta as Avaliações do Atendimento como um todo (Estrelas)
     for (const r of chatAudits as any[]) {
       const d = new Date(r.createdAt);
       lines.push([
@@ -570,14 +637,12 @@ app.get('/api/reports/export', async (req, res) => {
         r.carteiraTag || '-',
         r.rating ? `${r.rating} Estrelas` : 'Sem nota',
         '-', '-', '-',
-        r.violatedPromptRules ? 'Sim' : 'Não',
-        r.knowledgeBaseFail ? 'Sim' : 'Não',
+        formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
         r.auditorFeedback || '-',
         '-'
       ].map(toCsvCell).join(';'));
     }
 
-    // 2. Exporta as Correções de Respostas Específicas
     for (const r of messageAudits as any[]) {
       const d = new Date(r.createdAt);
       const chatInfo = chatAuditMap.get(r.chatId) || {};
@@ -592,8 +657,7 @@ app.get('/api/reports/export', async (req, res) => {
         r.topicId ? topicById.get(r.topicId) : '-',
         r.subtopicId ? subtopicById.get(r.subtopicId) : '-',
         r.clientQuestion || '-',
-        r.violatedPromptRules ? 'Sim' : 'Não',
-        r.knowledgeBaseFail ? 'Sim' : 'Não',
+        formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
         r.auditorFeedback || '-',
         r.generatedQa ? 'Sim' : 'Não'
       ].map(toCsvCell).join(';'));
