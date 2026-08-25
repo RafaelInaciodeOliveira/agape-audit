@@ -7,14 +7,13 @@ import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
-  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar
+  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
-// Criamos a Tipagem Exata para evitar os erros do TypeScript/ESLint
 interface KnowledgeItem {
   id?: string;
   module: string;
@@ -50,48 +49,54 @@ export default function BaseConhecimentoPage() {
   const [uploading, setUploading] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Estados para exclusão
   const [moduleToDelete, setModuleToDelete] = useState<string | null>(null);
-
-  // Estados para edição do TXT
   const [editingModule, setEditingModule] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [editKbId, setEditKbId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Base de conhecimento escolhida pra receber o próximo upload
+  // Estados de Sincronização
   const [uploadKbId, setUploadKbId] = useState('');
+  const [autoSync, setAutoSync] = useState(false);
+  const [syncingModule, setSyncingModule] = useState<string | null>(null);
 
   const { data: modules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
-  // Aplicamos a tipagem no SWR
   const { data: items = [] } = useSWR<KnowledgeItem[]>(`${API_URL}/knowledge`, fetcher);
   const { data: umblerBases = [] } = useSWR<UmblerKnowledgeBase[]>(`${API_URL}/knowledge/umbler-bases`, fetcher);
   const { data: config } = useSWR<{ defaultKnowledgeBaseId?: string }>(`${API_URL}/config`, fetcher);
 
+  const ALLOWED_BASES = [
+    "Base Geral de Conhecimento",
+    "Consultas de API's",
+    "Consultas de API´s",
+    "Infos Técnicas",
+    "Processo App e Site"
+  ];
+  
+  const activeBases = umblerBases.filter(kb => ALLOWED_BASES.includes(kb.name.trim()));
   const defaultKbId = config?.defaultKnowledgeBaseId || '';
 
-  // Nomes de base duplicados (a conta tem "Base Padrão" repetida) ganham um sufixo do id pra diferenciar
-  const kbNameCounts = umblerBases.reduce<Record<string, number>>((acc, kb) => {
+  const kbNameCounts = activeBases.reduce<Record<string, number>>((acc, kb) => {
     acc[kb.name] = (acc[kb.name] || 0) + 1;
     return acc;
   }, {});
+  
   const kbLabel = (kb: UmblerKnowledgeBase) =>
     kbNameCounts[kb.name] > 1 ? `${kb.name} (…${kb.id.slice(-6)})` : kb.name;
+    
   const kbNameById = (id?: string) => umblerBases.find((kb) => kb.id === id);
-
   const currentUploadKbId = uploadKbId || defaultKbId;
 
-  // De qual base cada módulo é hoje (primeiro item que tiver a info, com fallback pra padrão)
   const moduleKbId = (moduleName: string) => {
     const moduleItems = items.filter((it) => it.module === moduleName);
     return moduleItems.find((it) => it.knowledgeBaseId)?.knowledgeBaseId || defaultKbId;
   };
+  
   const moduleKbName = (moduleName: string) => {
     const kbId = moduleKbId(moduleName);
     return kbNameById(kbId)?.name || items.find((it) => it.module === moduleName)?.knowledgeBaseName || 'Base Geral de Conhecimento';
   };
 
-  // Agrupa os módulos por base de conhecimento pra exibição
   const groupedModules = modules.reduce<Record<string, string[]>>((acc, moduleName) => {
     const groupName = moduleKbName(moduleName);
     if (!acc[groupName]) acc[groupName] = [];
@@ -102,6 +107,26 @@ export default function BaseConhecimentoPage() {
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
   }
+
+  const handleSyncWithUmbler = async (moduleName: string, kbId: string) => {
+    setSyncingModule(moduleName);
+    const promise = axios.post(`${API_URL}/knowledge/sync-umbler`, {
+      moduleName,
+      knowledgeBaseId: kbId
+    });
+
+    toast.promise(promise, {
+      loading: `Enviando "${moduleName}" para a Umbler...`,
+      success: () => {
+        setSyncingModule(null);
+        return 'Enviado com sucesso!';
+      },
+      error: () => {
+        setSyncingModule(null);
+        return 'Erro ao enviar. Verifique os logs do servidor.';
+      },
+    });
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -115,9 +140,14 @@ export default function BaseConhecimentoPage() {
     setUploading(true);
     try {
       await axios.post(`${API_URL}/knowledge/upload-txt`, formData);
-      toast.success('Módulo importado com sucesso!');
+      toast.success('Módulo salvo no sistema com sucesso!');
       mutate(`${API_URL}/knowledge/modules`);
       mutate(`${API_URL}/knowledge`);
+
+      if (autoSync) {
+        const generatedModuleName = file.name.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral';
+        handleSyncWithUmbler(generatedModuleName, currentUploadKbId);
+      }
     } catch {
       toast.error('Erro ao importar arquivo.');
     } finally {
@@ -182,7 +212,13 @@ export default function BaseConhecimentoPage() {
       toast.success('Arquivo atualizado com sucesso!');
       mutate(`${API_URL}/knowledge/modules`);
       mutate(`${API_URL}/knowledge`);
+      
+      const currentModule = editingModule;
       setEditingModule(null);
+
+      if (autoSync) {
+        handleSyncWithUmbler(currentModule, editKbId);
+      }
     } catch {
       toast.error('Erro ao salvar alterações.');
     } finally {
@@ -195,42 +231,43 @@ export default function BaseConhecimentoPage() {
       toast.error('Nenhum módulo disponível para download.');
       return;
     }
-
     modules.forEach((mod, index) => {
-      setTimeout(() => {
-        handleDownloadModule(mod);
-      }, index * 400);
+      setTimeout(() => { handleDownloadModule(mod); }, index * 400);
     });
-
     toast.info(`Baixando ${modules.length} arquivos separadamente...`);
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans overflow-x-hidden">
       <Toaster theme="dark" position="top-right" richColors />
 
-      <div className="max-w-6xl mx-auto space-y-8">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-6 flex-wrap gap-4">
-          <div className="flex items-center gap-4">
+      <div className="max-w-7xl mx-auto space-y-8">
+        
+        {/* CABEÇALHO */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-6 w-full gap-4">
+          
+          {/* Lado Esquerdo - Título */}
+          <div className="flex items-center gap-4 min-w-0 pr-2">
             <Link 
               href="/" 
-              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all"
+              className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all shrink-0"
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-blue-400 flex items-center gap-2">
-                <BookOpen className="w-6 h-6" /> Central da Base de Conhecimento
+            <div className="truncate">
+              <h1 className="text-xl md:text-2xl font-bold text-blue-400 flex items-center gap-2 truncate">
+                <BookOpen className="w-6 h-6 shrink-0" /> Central da Base de Conhecimento
               </h1>
-              <p className="text-xs text-slate-400 mt-1">
-                Gerencie, treine via auditorias e baixe os arquivos prontos para a Umbler.
+              <p className="text-[10px] md:text-xs text-slate-400 mt-1 truncate">
+                Gerencie, treine via auditorias e envie os arquivos para a Umbler.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* TOGGLE MODO DE VISUALIZAÇÃO */}
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
+          {/* Lado Direito - Botões */}
+          <div className="flex items-center gap-3 shrink-0 overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+            
+            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1 shrink-0">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
@@ -247,26 +284,43 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 shrink-0">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <Database className="w-3 h-3" /> Novo arquivo vai para:
               </span>
+              {/* Largura aumentada para w-[220px] para caber o texto completo */}
               <select
                 value={currentUploadKbId}
                 onChange={(e) => setUploadKbId(e.target.value)}
-                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer max-w-[220px]"
+                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-1.5 text-xs font-medium text-blue-300 outline-none cursor-pointer w-[220px]"
               >
-                {umblerBases.map((kb) => (
-                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
+                <option value="" disabled className="bg-slate-900 text-slate-500">Selecione uma base...</option>
+                {activeBases.map((kb) => (
+                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200 truncate">
                     {kbLabel(kb)}
                   </option>
                 ))}
               </select>
             </div>
 
-            <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all">
+            <label className="flex flex-col gap-1 cursor-pointer group shrink-0">
+              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
+                <RefreshCw className={`w-3 h-3 ${autoSync ? 'text-emerald-400' : 'text-slate-500'}`} /> Envio Auto
+              </span>
+              <div className="relative inline-flex items-center">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer" 
+                  checked={autoSync}
+                  onChange={() => setAutoSync(!autoSync)} 
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 border border-slate-700"></div>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all shrink-0">
               <Upload className="w-4 h-4" />
-              {uploading ? 'Importando...' : 'Subir Novo Arquivo'}
+              {uploading ? 'Importando...' : 'Subir'}
               <input
                 type="file"
                 accept=".txt,.json,.yaml,.yml"
@@ -278,7 +332,7 @@ export default function BaseConhecimentoPage() {
 
             <button
               onClick={handleDownloadAllIndividual}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-xs transition-all cursor-pointer"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-xs transition-all cursor-pointer shrink-0"
             >
               <FolderDown className="w-4 h-4 text-emerald-400" />
               Baixar Todos
@@ -294,36 +348,176 @@ export default function BaseConhecimentoPage() {
           </div>
         ) : viewMode === 'grid' ? (
           <div className="space-y-8">
-            {Object.entries(groupedModules).map(([kbName, moduleNames]) => (
-              <div key={kbName}>
-                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
-                  <Database className="w-4 h-4 text-blue-400" /> {kbName}
-                  <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{moduleNames.length}</span>
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {moduleNames.map((moduleName, i) => {
-                    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
-                    const createdAt = moduleItems[0]?.createdAt;
-                    const updatedAt = moduleItems[0]?.updatedAt;
-                    const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-                    const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
+            {/* Ordena as Bases de Conhecimento (Tópicos) de A a Z */}
+            {Object.entries(groupedModules)
+              .sort(([kbNameA], [kbNameB]) => kbNameA.localeCompare(kbNameB))
+              .map(([kbName, moduleNames]) => {
+                // Ordena os Módulos (Arquivos) de A a Z
+                const sortedModules = [...moduleNames].sort((a, b) => a.localeCompare(b));
 
-                    return (
-                      <div
-                        key={i}
-                        className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
-                      >
-                        <div>
-                          <div className="flex justify-between items-start mb-3">
-                            <span className="p-2.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
-                              <FileText className="w-5 h-5" />
-                            </span>
+                return (
+                  <div key={kbName}>
+                    <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
+                      <Database className="w-4 h-4 text-blue-400" /> {kbName}
+                      <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{sortedModules.length}</span>
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {sortedModules.map((moduleName, i) => {
+                        const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
+                        const createdAt = moduleItems[0]?.createdAt;
+                        const updatedAt = moduleItems[0]?.updatedAt;
+                        const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+                        const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
+                        const currentKbId = moduleKbId(moduleName);
 
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
-                                {moduleItems.length} tópico(s)
+                        return (
+                          <div
+                            key={i}
+                            className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
+                          >
+                            <div>
+                              <div className="flex justify-between items-start mb-3">
+                                <span className="p-2.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
+                                  <FileText className="w-5 h-5" />
+                                </span>
+
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
+                                    {moduleItems.length} tópico(s)
+                                  </span>
+
+                                  <button
+                                    onClick={() => handleOpenEditor(moduleName)}
+                                    title="Editar conteúdo"
+                                    className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    onClick={() => setModuleToDelete(moduleName)}
+                                    title="Excluir este módulo"
+                                    className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
+
+                              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
+                                <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                {isModified ? (
+                                  <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                                ) : (
+                                  <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                                )}
+                              </div>
+
+                              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
+                                {previewText}
+                              </p>
+                            </div>
+
+                            <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
+                              <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
+                                <Sparkles className="w-3 h-3 text-amber-400" /> Pronto p/ Umbler
                               </span>
 
+                              <div className="flex gap-2">
+                                {!autoSync && (
+                                  <button
+                                    onClick={() => handleSyncWithUmbler(moduleName, currentKbId)}
+                                    disabled={syncingModule === moduleName}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                                  >
+                                    <RefreshCw className={`w-3.5 h-3.5 ${syncingModule === moduleName ? 'animate-spin' : ''}`} /> 
+                                    {syncingModule === moduleName ? 'Enviando...' : 'Enviar'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDownloadModule(moduleName)}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> Baixar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+            })}
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {/* Aplica a mesma ordenação de A a Z na visualização em Lista */}
+            {Object.entries(groupedModules)
+              .sort(([kbNameA], [kbNameB]) => kbNameA.localeCompare(kbNameB))
+              .map(([kbName, moduleNames]) => {
+                const sortedModules = [...moduleNames].sort((a, b) => a.localeCompare(b));
+
+                return (
+                  <div key={kbName}>
+                    <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
+                      <Database className="w-4 h-4 text-blue-400" /> {kbName}
+                      <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{sortedModules.length}</span>
+                    </h2>
+                    <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
+                      {sortedModules.map((moduleName, i) => {
+                        const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
+                        const createdAt = moduleItems[0]?.createdAt;
+                        const updatedAt = moduleItems[0]?.updatedAt;
+                        const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+                        const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
+                        const currentKbId = moduleKbId(moduleName);
+
+                        return (
+                          <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
+                            <div className="flex items-center gap-4 min-w-0 flex-1">
+                              <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
+                                <FileText className="w-4 h-4" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
+                                <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
+                                  <span>{moduleItems.length} tópico(s)</span>
+                                  <span>•</span>
+                                  {isModified ? (
+                                    <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                                  ) : (
+                                    <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
+                                  {previewText}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              {!autoSync && (
+                                <button
+                                  onClick={() => handleSyncWithUmbler(moduleName, currentKbId)}
+                                  disabled={syncingModule === moduleName}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                                  title="Enviar p/ Umbler"
+                                >
+                                  <RefreshCw className={`w-3.5 h-3.5 ${syncingModule === moduleName ? 'animate-spin' : ''}`} /> 
+                                  {syncingModule === moduleName ? 'Enviando...' : 'Enviar'}
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => handleDownloadModule(moduleName)}
+                                className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+                                title="Baixar .TXT"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => handleOpenEditor(moduleName)}
                                 title="Editar conteúdo"
@@ -331,7 +525,6 @@ export default function BaseConhecimentoPage() {
                               >
                                 <Pencil className="w-4 h-4" />
                               </button>
-
                               <button
                                 onClick={() => setModuleToDelete(moduleName)}
                                 title="Excluir este módulo"
@@ -341,112 +534,12 @@ export default function BaseConhecimentoPage() {
                               </button>
                             </div>
                           </div>
-
-                          <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
-
-                          {/* Exibição de Data da Importação / Modificação */}
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
-                            <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            {isModified ? (
-                              <span>Modificado em: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
-                            ) : (
-                              <span>Importado em: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
-                            )}
-                          </div>
-
-                          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
-                            {previewText}
-                          </p>
-                        </div>
-
-                        <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
-                          <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
-                            <Sparkles className="w-3 h-3 text-amber-400" /> Pronto para Umbler
-                          </span>
-
-                          <button
-                            onClick={() => handleDownloadModule(moduleName)}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" /> Baixar .TXT
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          /* VISUALIZAÇÃO EM LISTA */
-          <div className="space-y-8">
-            {Object.entries(groupedModules).map(([kbName, moduleNames]) => (
-              <div key={kbName}>
-                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
-                  <Database className="w-4 h-4 text-blue-400" /> {kbName}
-                  <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{moduleNames.length}</span>
-                </h2>
-                <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
-                  {moduleNames.map((moduleName, i) => {
-                    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
-                    const createdAt = moduleItems[0]?.createdAt;
-                    const updatedAt = moduleItems[0]?.updatedAt;
-                    const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-                    const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
-
-                    return (
-                      <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
-                        <div className="flex items-center gap-4 min-w-0 flex-1">
-                          <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
-                            <FileText className="w-4 h-4" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
-                            <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
-                              <span>{moduleItems.length} tópico(s)</span>
-                              <span>•</span>
-                              {isModified ? (
-                                <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
-                              ) : (
-                                <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
-                              {previewText}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            onClick={() => handleDownloadModule(moduleName)}
-                            className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
-                            title="Baixar .TXT"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditor(moduleName)}
-                            title="Editar conteúdo"
-                            className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setModuleToDelete(moduleName)}
-                            title="Excluir este módulo"
-                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+            })}
           </div>
         )}
       </div>
@@ -516,7 +609,7 @@ export default function BaseConhecimentoPage() {
                 onChange={(e) => setEditKbId(e.target.value)}
                 className="w-full bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer"
               >
-                {umblerBases.map((kb) => (
+                {activeBases.map((kb) => (
                   <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
                     {kbLabel(kb)}
                   </option>
