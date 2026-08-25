@@ -40,9 +40,9 @@ function buildTxtFromItems(items: any[]): string {
 }
 
 // Sincroniza com a Umbler sem derrubar a resposta local se der erro
-async function syncModuleToUmbler(moduleName: string, content: string): Promise<boolean> {
+async function syncModuleToUmbler(moduleName: string, content: string, kbId?: string): Promise<boolean> {
   try {
-    await UmblerService.syncKnowledgeDocument(`${moduleName}.txt`, content);
+    await UmblerService.syncKnowledgeDocument(`${moduleName}.txt`, content, kbId);
     return true;
   } catch (error: any) {
     console.error(`Erro ao sincronizar "${moduleName}" com a Umbler:`, error.response?.data || error.message);
@@ -50,10 +50,23 @@ async function syncModuleToUmbler(moduleName: string, content: string): Promise<
   }
 }
 
+// Lista as bases de conhecimento da Umbler (pra escolher onde cada arquivo é salvo)
+router.get('/umbler-bases', async (_req: Request, res: Response) => {
+  try {
+    const bases = await UmblerService.listKnowledgeBases();
+    res.json(bases);
+  } catch (error: any) {
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
 // 1. IMPORTAR ARQUIVO DE CONHECIMENTO (.TXT, .JSON, .SWAGGER)
 router.post('/upload-txt', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+
+    const knowledgeBaseId = req.body.knowledgeBaseId || undefined;
+    const knowledgeBaseName = req.body.knowledgeBaseName || undefined;
 
     let originalName = req.file.originalname;
     try {
@@ -88,6 +101,8 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
           title: currentTitle.trim() || 'Tópico',
           content: currentContent.trim(),
           source: 'upload_txt',
+          knowledgeBaseId,
+          knowledgeBaseName,
           createdAt: nowIso,
           updatedAt: nowIso
         });
@@ -150,11 +165,22 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     const db = await getDb();
 
+    // Se o módulo já existia numa base diferente, limpa o documento antigo lá antes de recriar
+    const previousItems = await db.collection('knowledge').find({ module: currentModule }).toArray();
+    const previousKbId = previousItems[0]?.knowledgeBaseId;
+    if (previousKbId && previousKbId !== knowledgeBaseId) {
+      try {
+        await UmblerService.deleteKnowledgeDocument(`${currentModule}.txt`, previousKbId);
+      } catch (error: any) {
+        console.error(`Erro ao remover "${currentModule}" da base antiga:`, error.response?.data || error.message);
+      }
+    }
+
     let umblerSynced = false;
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
-      umblerSynced = await syncModuleToUmbler(currentModule, buildTxtFromItems(itemsToSave));
+      umblerSynced = await syncModuleToUmbler(currentModule, buildTxtFromItems(itemsToSave), knowledgeBaseId);
     }
 
     return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length, umblerSynced });
@@ -177,6 +203,10 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     const createdAt = existingItems.length > 0 && existingItems[0].createdAt ? existingItems[0].createdAt : new Date().toISOString();
     const updatedAt = new Date().toISOString();
 
+    const previousKbId = existingItems[0]?.knowledgeBaseId;
+    const knowledgeBaseId = req.body.knowledgeBaseId || previousKbId || undefined;
+    const knowledgeBaseName = req.body.knowledgeBaseName || existingItems[0]?.knowledgeBaseName || undefined;
+
     const lines = textContent.split('\n');
     let currentSection = 'Geral';
     let currentTitle = '';
@@ -194,6 +224,8 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
           title: currentTitle.trim() || 'Tópico',
           content: currentContent.trim(),
           source: 'manual',
+          knowledgeBaseId,
+          knowledgeBaseName,
           createdAt,
           updatedAt
         });
@@ -247,11 +279,20 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
       itemsToSave[0].source = 'manual_raw';
     }
 
+    // Se a base de conhecimento mudou, limpa o documento na base antiga antes de recriar na nova
+    if (previousKbId && previousKbId !== knowledgeBaseId) {
+      try {
+        await UmblerService.deleteKnowledgeDocument(`${moduleName}.txt`, previousKbId);
+      } catch (error: any) {
+        console.error(`Erro ao remover "${moduleName}" da base antiga:`, error.response?.data || error.message);
+      }
+    }
+
     await db.collection('knowledge').deleteMany({ module: moduleName });
     let umblerSynced = false;
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').insertMany(itemsToSave);
-      umblerSynced = await syncModuleToUmbler(moduleName, buildTxtFromItems(itemsToSave));
+      umblerSynced = await syncModuleToUmbler(moduleName, buildTxtFromItems(itemsToSave), knowledgeBaseId);
     }
 
     return res.json({ success: true, totalItems: itemsToSave.length, umblerSynced });
@@ -290,11 +331,14 @@ router.get('/export-txt', async (req: Request, res: Response) => {
 router.delete('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
+    const existingItems = await db.collection('knowledge').find({ module: req.params.moduleName }).toArray();
+    const knowledgeBaseId = existingItems[0]?.knowledgeBaseId;
+
     await db.collection('knowledge').deleteMany({ module: req.params.moduleName });
 
     let umblerSynced = false;
     try {
-      await UmblerService.deleteKnowledgeDocument(`${req.params.moduleName}.txt`);
+      await UmblerService.deleteKnowledgeDocument(`${req.params.moduleName}.txt`, knowledgeBaseId);
       umblerSynced = true;
     } catch (error: any) {
       console.error(`Erro ao remover "${req.params.moduleName}" da Umbler:`, error.response?.data || error.message);

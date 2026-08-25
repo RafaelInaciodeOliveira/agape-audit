@@ -144,10 +144,19 @@ export const UmblerService = {
     return qaResponse.data;
   },
 
+  // Lista todas as bases de conhecimento da conta (pra escolher onde sincronizar cada arquivo)
+  listKnowledgeBases: async () => {
+    const response = await umblerApi.get('/v1/knowledge-bases/', {
+      params: { organizationId },
+    });
+    return response.data || [];
+  },
+
   // Sincroniza um arquivo da base de conhecimento local com a Umbler:
   // se já existir um documento com esse nome lá, apaga e recria (a API não tem "editar").
-  syncKnowledgeDocument: async (fileName: string, content: string) => {
-    const kbId = process.env.UMBLER_KB_ID;
+  // kbId: base de conhecimento de destino; se não informado, usa a padrão do .env.
+  syncKnowledgeDocument: async (fileName: string, content: string, kbId?: string) => {
+    kbId = kbId || process.env.UMBLER_KB_ID;
     const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
 
     const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {
@@ -176,8 +185,9 @@ export const UmblerService = {
   },
 
   // Remove da Umbler o documento correspondente a um arquivo apagado localmente
-  deleteKnowledgeDocument: async (fileName: string) => {
-    const kbId = process.env.UMBLER_KB_ID;
+  // kbId: base de conhecimento de onde remover; se não informado, usa a padrão do .env.
+  deleteKnowledgeDocument: async (fileName: string, kbId?: string) => {
+    kbId = kbId || process.env.UMBLER_KB_ID;
     const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
 
     const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {

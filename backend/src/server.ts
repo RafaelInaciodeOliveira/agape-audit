@@ -248,7 +248,11 @@ app.post('/api/audits', async (req, res) => {
 });
 
 app.get('/api/config', (_req, res) => {
-  res.json({ agapeMemberId: AGAPE_MEMBER_ID, attendants: KNOWN_ATTENDANTS });
+  res.json({
+    agapeMemberId: AGAPE_MEMBER_ID,
+    attendants: KNOWN_ATTENDANTS,
+    defaultKnowledgeBaseId: process.env.UMBLER_KB_ID,
+  });
 });
 
 app.get('/api/topics', async (_req, res) => {

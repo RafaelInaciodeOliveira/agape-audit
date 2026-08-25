@@ -22,8 +22,16 @@ interface KnowledgeItem {
   title: string;
   content: string;
   source?: string;
+  knowledgeBaseId?: string;
+  knowledgeBaseName?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface UmblerKnowledgeBase {
+  id: string;
+  name: string;
+  status?: string;
 }
 
 function formatDate(rawDate?: string) {
@@ -48,11 +56,48 @@ export default function BaseConhecimentoPage() {
   // Estados para edição do TXT
   const [editingModule, setEditingModule] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [editKbId, setEditKbId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Base de conhecimento escolhida pra receber o próximo upload
+  const [uploadKbId, setUploadKbId] = useState('');
 
   const { data: modules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
   // Aplicamos a tipagem no SWR
   const { data: items = [] } = useSWR<KnowledgeItem[]>(`${API_URL}/knowledge`, fetcher);
+  const { data: umblerBases = [] } = useSWR<UmblerKnowledgeBase[]>(`${API_URL}/knowledge/umbler-bases`, fetcher);
+  const { data: config } = useSWR<{ defaultKnowledgeBaseId?: string }>(`${API_URL}/config`, fetcher);
+
+  const defaultKbId = config?.defaultKnowledgeBaseId || '';
+
+  // Nomes de base duplicados (a conta tem "Base Padrão" repetida) ganham um sufixo do id pra diferenciar
+  const kbNameCounts = umblerBases.reduce<Record<string, number>>((acc, kb) => {
+    acc[kb.name] = (acc[kb.name] || 0) + 1;
+    return acc;
+  }, {});
+  const kbLabel = (kb: UmblerKnowledgeBase) =>
+    kbNameCounts[kb.name] > 1 ? `${kb.name} (…${kb.id.slice(-6)})` : kb.name;
+  const kbNameById = (id?: string) => umblerBases.find((kb) => kb.id === id);
+
+  const currentUploadKbId = uploadKbId || defaultKbId;
+
+  // De qual base cada módulo é hoje (primeiro item que tiver a info, com fallback pra padrão)
+  const moduleKbId = (moduleName: string) => {
+    const moduleItems = items.filter((it) => it.module === moduleName);
+    return moduleItems.find((it) => it.knowledgeBaseId)?.knowledgeBaseId || defaultKbId;
+  };
+  const moduleKbName = (moduleName: string) => {
+    const kbId = moduleKbId(moduleName);
+    return kbNameById(kbId)?.name || items.find((it) => it.module === moduleName)?.knowledgeBaseName || 'Base Geral de Conhecimento';
+  };
+
+  // Agrupa os módulos por base de conhecimento pra exibição
+  const groupedModules = modules.reduce<Record<string, string[]>>((acc, moduleName) => {
+    const groupName = moduleKbName(moduleName);
+    if (!acc[groupName]) acc[groupName] = [];
+    acc[groupName].push(moduleName);
+    return acc;
+  }, {});
 
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
@@ -64,6 +109,8 @@ export default function BaseConhecimentoPage() {
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('knowledgeBaseId', currentUploadKbId);
+    formData.append('knowledgeBaseName', kbNameById(currentUploadKbId)?.name || '');
 
     setUploading(true);
     try {
@@ -118,6 +165,7 @@ export default function BaseConhecimentoPage() {
     });
 
     setEditText(txtOutput.trim());
+    setEditKbId(moduleKbId(moduleName));
     setEditingModule(moduleName);
   };
 
@@ -127,7 +175,9 @@ export default function BaseConhecimentoPage() {
     setSavingEdit(true);
     try {
       await axios.put(`${API_URL}/knowledge/module/${encodeURIComponent(editingModule)}`, {
-        textContent: editText
+        textContent: editText,
+        knowledgeBaseId: editKbId,
+        knowledgeBaseName: kbNameById(editKbId)?.name || '',
       });
       toast.success('Arquivo atualizado com sucesso!');
       mutate(`${API_URL}/knowledge/modules`);
@@ -197,15 +247,28 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
+            <select
+              value={currentUploadKbId}
+              onChange={(e) => setUploadKbId(e.target.value)}
+              title="Base de conhecimento de destino do próximo upload"
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 outline-none cursor-pointer max-w-[220px]"
+            >
+              {umblerBases.map((kb) => (
+                <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
+                  {kbLabel(kb)}
+                </option>
+              ))}
+            </select>
+
             <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all">
               <Upload className="w-4 h-4" />
               {uploading ? 'Importando...' : 'Subir Novo Arquivo'}
-              <input 
-                type="file" 
-                accept=".txt,.json,.yaml,.yml" 
-                onChange={handleFileUpload} 
+              <input
+                type="file"
+                accept=".txt,.json,.yaml,.yml"
+                onChange={handleFileUpload}
                 disabled={uploading}
-                className="hidden" 
+                className="hidden"
               />
             </label>
 
@@ -226,140 +289,160 @@ export default function BaseConhecimentoPage() {
             <p className="text-slate-500 text-xs">Suba um arquivo acima para começar.</p>
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {modules.map((moduleName, i) => {
-              const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
-              const createdAt = moduleItems[0]?.createdAt;
-              const updatedAt = moduleItems[0]?.updatedAt;
-              const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-              const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
+          <div className="space-y-8">
+            {Object.entries(groupedModules).map(([kbName, moduleNames]) => (
+              <div key={kbName}>
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
+                  <Database className="w-4 h-4 text-blue-400" /> {kbName}
+                  <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{moduleNames.length}</span>
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {moduleNames.map((moduleName, i) => {
+                    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
+                    const createdAt = moduleItems[0]?.createdAt;
+                    const updatedAt = moduleItems[0]?.updatedAt;
+                    const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+                    const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
 
-              return (
-                <div 
-                  key={i} 
-                  className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
-                >
-                  <div>
-                    <div className="flex justify-between items-start mb-3">
-                      <span className="p-2.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
-                        <FileText className="w-5 h-5" />
-                      </span>
-                      
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
-                          {moduleItems.length} tópico(s)
-                        </span>
+                    return (
+                      <div
+                        key={i}
+                        className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
+                      >
+                        <div>
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="p-2.5 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400">
+                              <FileText className="w-5 h-5" />
+                            </span>
 
-                        <button
-                          onClick={() => handleOpenEditor(moduleName)}
-                          title="Editar conteúdo"
-                          className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
+                                {moduleItems.length} tópico(s)
+                              </span>
 
-                        <button
-                          onClick={() => setModuleToDelete(moduleName)}
-                          title="Excluir este módulo"
-                          className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                              <button
+                                onClick={() => handleOpenEditor(moduleName)}
+                                title="Editar conteúdo"
+                                className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+
+                              <button
+                                onClick={() => setModuleToDelete(moduleName)}
+                                title="Excluir este módulo"
+                                className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
+
+                          {/* Exibição de Data da Importação / Modificação */}
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
+                            <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            {isModified ? (
+                              <span>Modificado em: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                            ) : (
+                              <span>Importado em: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
+                            {previewText}
+                          </p>
+                        </div>
+
+                        <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
+                          <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
+                            <Sparkles className="w-3 h-3 text-amber-400" /> Pronto para Umbler
+                          </span>
+
+                          <button
+                            onClick={() => handleDownloadModule(moduleName)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" /> Baixar .TXT
+                          </button>
+                        </div>
                       </div>
-                    </div>
-
-                    <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
-                    
-                    {/* Exibição de Data da Importação / Modificação */}
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
-                      <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      {isModified ? (
-                        <span>Modificado em: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
-                      ) : (
-                        <span>Importado em: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
-                      )}
-                    </div>
-
-                    <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
-                      {previewText}
-                    </p>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
-                    <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
-                      <Sparkles className="w-3 h-3 text-amber-400" /> Pronto para Umbler
-                    </span>
-
-                    <button
-                      onClick={() => handleDownloadModule(moduleName)}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5" /> Baixar .TXT
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         ) : (
           /* VISUALIZAÇÃO EM LISTA */
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
-            {modules.map((moduleName, i) => {
-              const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
-              const createdAt = moduleItems[0]?.createdAt;
-              const updatedAt = moduleItems[0]?.updatedAt;
-              const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-              const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
+          <div className="space-y-8">
+            {Object.entries(groupedModules).map(([kbName, moduleNames]) => (
+              <div key={kbName}>
+                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-300 mb-3">
+                  <Database className="w-4 h-4 text-blue-400" /> {kbName}
+                  <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded-full text-slate-500">{moduleNames.length}</span>
+                </h2>
+                <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
+                  {moduleNames.map((moduleName, i) => {
+                    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
+                    const createdAt = moduleItems[0]?.createdAt;
+                    const updatedAt = moduleItems[0]?.updatedAt;
+                    const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
+                    const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
 
-              return (
-                <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
-                  <div className="flex items-center gap-4 min-w-0 flex-1">
-                    <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
-                      <FileText className="w-4 h-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
-                      <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
-                        <span>{moduleItems.length} tópico(s)</span>
-                        <span>•</span>
-                        {isModified ? (
-                          <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
-                        ) : (
-                          <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
-                        )}
+                    return (
+                      <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
+                        <div className="flex items-center gap-4 min-w-0 flex-1">
+                          <span className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-400 shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
+                            <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
+                              <span>{moduleItems.length} tópico(s)</span>
+                              <span>•</span>
+                              {isModified ? (
+                                <span>Modificado: <strong className="text-slate-200">{formatDate(updatedAt)}</strong></span>
+                              ) : (
+                                <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
+                              {previewText}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleDownloadModule(moduleName)}
+                            className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
+                            title="Baixar .TXT"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEditor(moduleName)}
+                            title="Editar conteúdo"
+                            className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setModuleToDelete(moduleName)}
+                            title="Excluir este módulo"
+                            className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
-                        {previewText}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => handleDownloadModule(moduleName)}
-                      className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs font-bold transition-all cursor-pointer"
-                      title="Baixar .TXT"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleOpenEditor(moduleName)}
-                      title="Editar conteúdo"
-                      className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setModuleToDelete(moduleName)}
-                      title="Excluir este módulo"
-                      className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -418,6 +501,23 @@ export default function BaseConhecimentoPage() {
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+
+            <div className="px-6 pt-4">
+              <label className="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider font-mono">
+                Base de Conhecimento (Umbler)
+              </label>
+              <select
+                value={editKbId}
+                onChange={(e) => setEditKbId(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 outline-none cursor-pointer"
+              >
+                {umblerBases.map((kb) => (
+                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
+                    {kbLabel(kb)}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="flex-1 p-6 bg-slate-950 flex flex-col">
