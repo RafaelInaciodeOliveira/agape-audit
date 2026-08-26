@@ -662,6 +662,52 @@ app.get('/api/reports/export', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// --- WEBHOOK DO STRAPI (NOVIDADES PROVER) ---
+app.post('/api/webhooks/strapi', async (req, res) => {
+  try {
+    const { event, entry } = req.body;
+
+    // Dispara apenas quando um artigo for criado, atualizado ou publicado
+    if (event === 'entry.create' || event === 'entry.publish' || event === 'entry.update') {
+      
+      // Tenta puxar o título e conteúdo usando os nomes de campos mais comuns do Strapi
+      const title = entry?.title || entry?.titulo || entry?.name || 'Nova Atualização do Sistema';
+      const content = entry?.content || entry?.conteudo || entry?.description || entry?.texto || '';
+
+      // Se o Strapi mandar um aviso sem texto, a gente ignora para não sujar a base
+      if (!content) {
+        return res.status(400).json({ error: 'Artigo sem conteúdo, ignorado.' });
+      }
+
+      // Monta o formato amigável para a IA ler
+      const qaQuestion = `Quais são as novidades sobre: ${title}?`;
+      const qaAnswer = `Sobre a novidade "${title}":\n\n${content}`;
+
+      const db = await getDb();
+      
+      // Salva direto na central de Base de Conhecimento local
+      await db.collection('knowledge').insertOne({
+        id: newId(),
+        module: 'Novidades Prover', // Cria/Usa o TXT "Novidades Prover"
+        section: 'Base Geral de Conhecimento', // Coloca na categoria correta
+        title: qaQuestion,
+        content: qaAnswer,
+        source: 'strapi_webhook',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
+      console.log(`🚀 Strapi Webhook: Novidade '${title}' salva no TXT Novidades Prover!`);
+      return res.json({ success: true, message: 'Novidade recebida e salva na Base de Conhecimento!' });
+    }
+
+    res.json({ success: true, message: 'Evento ignorado (não é criação/publicação).' });
+  } catch (error: any) {
+    console.error('Erro no Webhook do Strapi:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor Restaurado e Mongoose Conectado na porta ${PORT}!`);

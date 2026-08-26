@@ -938,7 +938,7 @@ export default function AuditDashboard() {
                         const colors = getRatingColor(chat.audit!.rating);
                         return (
                           <span className={`flex items-center font-bold gap-1 px-2 py-0.5 rounded shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
-                            <Star className={`w-3 h-3 ${colors.fill}`} /> {chat.audit!.rating}★
+                            <Star className={`w-3 h-3 ${colors.fill}`} /> {chat.audit!.rating}
                           </span>
                         );
                       })()
