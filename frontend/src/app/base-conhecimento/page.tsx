@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
-  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw
+  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, Clock
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -44,6 +44,20 @@ function formatDate(rawDate?: string) {
   }
 }
 
+function highlightText(text: string, term: string) {
+  if (!term) return text;
+  const parts = text.split(new RegExp(`(${term})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) => 
+        part.toLowerCase() === term.toLowerCase() 
+          ? <mark key={i} className="bg-amber-500/40 text-amber-100 rounded px-0.5">{part}</mark> 
+          : part
+      )}
+    </>
+  );
+}
+
 export default function BaseConhecimentoPage() {
   const isAuthorized = useAuth();
   const [uploading, setUploading] = useState(false);
@@ -54,8 +68,18 @@ export default function BaseConhecimentoPage() {
   const [editText, setEditText] = useState('');
   const [editKbId, setEditKbId] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Estados de Sincronização
+  // Estados do Histórico de Backups
+  const [viewingBackups, setViewingBackups] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [backupsList, setBackupsList] = useState<any[]>([]);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedBackup, setSelectedBackup] = useState<any | null>(null);
+  const [backupToDelete, setBackupToDelete] = useState<string | null>(null); // NOVO: Estado para a modal de apagar backup
+
   const [uploadKbId, setUploadKbId] = useState('');
   const [autoSync, setAutoSync] = useState(false);
   const [syncingModule, setSyncingModule] = useState<string | null>(null);
@@ -97,14 +121,26 @@ export default function BaseConhecimentoPage() {
     return kbNameById(kbId)?.name || items.find((it) => it.module === moduleName)?.knowledgeBaseName || 'Base Geral de Conhecimento';
   };
 
-  const groupedModules = modules.reduce<Record<string, string[]>>((acc, moduleName) => {
+  const filteredModules = modules.filter(moduleName => {
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    
+    if (moduleName.toLowerCase().includes(term)) return true;
+    
+    const moduleItems = items.filter(it => it.module === moduleName);
+    return moduleItems.some(it => 
+      (it.title && it.title.toLowerCase().includes(term)) || 
+      (it.content && it.content.toLowerCase().includes(term))
+    );
+  });
+
+  const groupedModules = filteredModules.reduce<Record<string, string[]>>((acc, moduleName) => {
     const groupName = moduleKbName(moduleName);
     if (!acc[groupName]) acc[groupName] = [];
     acc[groupName].push(moduleName);
     return acc;
   }, {});
 
-  // --- NOVA LÓGICA DE SINCRONIZAÇÃO COM TRATAMENTO DO ERRO 404 ---
   const handleSyncWithUmbler = async (moduleName: string, kbId: string) => {
     setSyncingModule(moduleName);
     const toastId = toast.loading(`Enviando "${moduleName}" para a Umbler...`);
@@ -116,9 +152,8 @@ export default function BaseConhecimentoPage() {
       });
       toast.success('Enviado e sincronizado com sucesso!', { id: toastId });
     } catch (error) {
-      // Usamos axios.isAxiosError para o TypeScript saber o formato exato do erro sem usar "any"
       if (axios.isAxiosError(error) && error.response?.status === 404) {
-        toast.info('Tudo certo! O arquivo já está atualizado na Umbler (nenhuma alteração nova para enviar).', { id: toastId });
+        toast.info('Tudo certo! O arquivo já está atualizado na Umbler.', { id: toastId });
       } else {
         toast.error('Erro ao enviar. Verifique os logs do servidor.', { id: toastId });
       }
@@ -236,6 +271,49 @@ export default function BaseConhecimentoPage() {
     toast.info(`Baixando ${modules.length} arquivos separadamente...`);
   };
 
+  const handleOpenBackups = async (moduleName: string) => {
+    setViewingBackups(moduleName);
+    setSelectedBackup(null);
+    setLoadingBackups(true);
+    try {
+      const res = await axios.get(`${API_URL}/knowledge/module/${encodeURIComponent(moduleName)}/backups`);
+      setBackupsList(res.data);
+    } catch {
+      toast.error("Erro ao carregar histórico de backups.");
+    } finally {
+      setLoadingBackups(false);
+    }
+  };
+
+  const handleRestoreBackup = () => {
+    if (!selectedBackup || !viewingBackups) return;
+    setEditText(selectedBackup.content);
+    setEditKbId(moduleKbId(viewingBackups));
+    setEditingModule(viewingBackups);
+    setViewingBackups(null);
+    toast.info('Texto do backup carregado! Revise e clique em "Salvar Alterações" para confirmar.');
+  };
+
+  // Lógica atualizada para usar a nova modal
+  const confirmDeleteBackup = async () => {
+    if (!backupToDelete) return;
+    
+    try {
+      await axios.delete(`${API_URL}/knowledge/backups/${backupToDelete}`);
+      toast.success("Backup apagado com sucesso!");
+      
+      setBackupsList(prev => prev.filter(b => b.id !== backupToDelete));
+      
+      if (selectedBackup?.id === backupToDelete) {
+        setSelectedBackup(null);
+      }
+    } catch {
+      toast.error("Erro ao apagar o backup.");
+    } finally {
+      setBackupToDelete(null);
+    }
+  };
+
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
   }
@@ -247,9 +325,7 @@ export default function BaseConhecimentoPage() {
       <div className="max-w-7xl mx-auto space-y-8">
         
         {/* CABEÇALHO */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-6 w-full gap-4">
-          
-          {/* Lado Esquerdo - Título */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between border-b border-slate-800 pb-6 w-full gap-4">
           <div className="flex items-center gap-4 min-w-0 pr-2">
             <Link 
               href="/" 
@@ -267,9 +343,19 @@ export default function BaseConhecimentoPage() {
             </div>
           </div>
 
-          {/* Lado Direito - Botões */}
-          <div className="flex items-center gap-3 shrink-0 overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
             
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Buscar palavra ou regra..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-200 outline-none focus:border-blue-500 transition-all placeholder:font-normal"
+              />
+            </div>
+
             <div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1 shrink-0">
               <button
                 onClick={() => setViewMode('grid')}
@@ -287,14 +373,14 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-1 shrink-0">
+            <div className="flex flex-col gap-1 shrink-0 hidden sm:flex">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <Database className="w-3 h-3" /> Novo arquivo vai para:
               </span>
               <select
                 value={currentUploadKbId}
                 onChange={(e) => setUploadKbId(e.target.value)}
-                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-1.5 text-xs font-medium text-blue-300 outline-none cursor-pointer w-[220px]"
+                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-1.5 text-xs font-medium text-blue-300 outline-none cursor-pointer w-[180px]"
               >
                 <option value="" disabled className="bg-slate-900 text-slate-500">Selecione uma base...</option>
                 {activeBases.map((kb) => (
@@ -305,7 +391,7 @@ export default function BaseConhecimentoPage() {
               </select>
             </div>
 
-            <label className="flex flex-col gap-1 cursor-pointer group shrink-0">
+            <label className="flex flex-col gap-1 cursor-pointer group shrink-0 hidden sm:flex">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <RefreshCw className={`w-3 h-3 ${autoSync ? 'text-emerald-400' : 'text-slate-500'}`} /> Envio Auto
               </span>
@@ -337,7 +423,7 @@ export default function BaseConhecimentoPage() {
               className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-xs transition-all cursor-pointer shrink-0"
             >
               <FolderDown className="w-4 h-4 text-emerald-400" />
-              Baixar Todos
+              <span className="hidden sm:block">Baixar Todos</span>
             </button>
           </div>
         </div>
@@ -347,6 +433,12 @@ export default function BaseConhecimentoPage() {
             <Database className="w-10 h-10 text-slate-600 mx-auto" />
             <p className="text-slate-400 font-medium text-sm">Nenhum módulo cadastrado na base.</p>
             <p className="text-slate-500 text-xs">Suba um arquivo acima para começar.</p>
+          </div>
+        ) : Object.keys(groupedModules).length === 0 && searchTerm ? (
+          <div className="text-center p-12 bg-slate-900/40 rounded-3xl border border-slate-800/80 space-y-3">
+            <Search className="w-10 h-10 text-slate-600 mx-auto" />
+            <p className="text-slate-400 font-medium text-sm">Nenhum resultado encontrado para &quot;{searchTerm}&quot;.</p>
+            <p className="text-slate-500 text-xs">Tente pesquisar usando outras palavras.</p>
           </div>
         ) : viewMode === 'grid' ? (
           <div className="space-y-8">
@@ -363,17 +455,34 @@ export default function BaseConhecimentoPage() {
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {sortedModules.map((moduleName, i) => {
+                        if (moduleName.startsWith('[BKP]')) return null;
+
                         const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
                         const createdAt = moduleItems[0]?.createdAt;
                         const updatedAt = moduleItems[0]?.updatedAt;
                         const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-                        const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
                         const currentKbId = moduleKbId(moduleName);
+
+                        const rawContent = moduleItems.map((it: KnowledgeItem) => `${it.title || ''} ${it.content || ''}`).join(' ');
+                        let previewText: React.ReactNode = rawContent.substring(0, 150) + '...';
+
+                        if (searchTerm) {
+                          const lowerContent = rawContent.toLowerCase();
+                          const termIdx = lowerContent.indexOf(searchTerm.toLowerCase());
+                          if (termIdx !== -1) {
+                            const start = Math.max(0, termIdx - 60);
+                            const end = Math.min(rawContent.length, termIdx + 60);
+                            const snippet = (start > 0 ? '...' : '') + rawContent.substring(start, end) + (end < rawContent.length ? '...' : '');
+                            previewText = highlightText(snippet, searchTerm);
+                          }
+                        } else if (moduleItems.length === 0) {
+                          previewText = 'Sem conteúdo.';
+                        }
 
                         return (
                           <div
                             key={i}
-                            className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md"
+                            className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md group"
                           >
                             <div>
                               <div className="flex justify-between items-start mb-3">
@@ -381,10 +490,18 @@ export default function BaseConhecimentoPage() {
                                   <FileText className="w-5 h-5" />
                                 </span>
 
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] font-mono bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 mr-1 hidden lg:block">
                                     {moduleItems.length} tópico(s)
                                   </span>
+
+                                  <button
+                                    onClick={() => handleOpenBackups(moduleName)}
+                                    title="Histórico de Backups"
+                                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                                  >
+                                    <History className="w-4 h-4" />
+                                  </button>
 
                                   <button
                                     onClick={() => handleOpenEditor(moduleName)}
@@ -404,7 +521,9 @@ export default function BaseConhecimentoPage() {
                                 </div>
                               </div>
 
-                              <h3 className="font-bold text-base text-slate-100 mb-1">{moduleName}</h3>
+                              <h3 className="font-bold text-base text-slate-100 mb-1">
+                                {searchTerm ? highlightText(moduleName, searchTerm) : moduleName}
+                              </h3>
 
                               <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mb-3">
                                 <Calendar className="w-3.5 h-3.5 text-blue-400 shrink-0" />
@@ -415,14 +534,14 @@ export default function BaseConhecimentoPage() {
                                 )}
                               </div>
 
-                              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed" title={previewText}>
+                              <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed break-words">
                                 {previewText}
                               </p>
                             </div>
 
                             <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
                               <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
-                                <Sparkles className="w-3 h-3 text-amber-400" /> Pronto p/ Umbler
+                                <Sparkles className="w-3 h-3 text-emerald-400" /> Pronto p/ Umbler
                               </span>
 
                               <div className="flex gap-2">
@@ -467,12 +586,29 @@ export default function BaseConhecimentoPage() {
                     </h2>
                     <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden divide-y divide-slate-800/80">
                       {sortedModules.map((moduleName, i) => {
+                        if (moduleName.startsWith('[BKP]')) return null;
+
                         const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
                         const createdAt = moduleItems[0]?.createdAt;
                         const updatedAt = moduleItems[0]?.updatedAt;
                         const isModified = createdAt && updatedAt && new Date(updatedAt).getTime() > new Date(createdAt).getTime() + 1000;
-                        const previewText = moduleItems.length > 0 ? moduleItems.map((i: KnowledgeItem) => i.content).join(' ').substring(0, 150) + '...' : 'Sem conteúdo.';
                         const currentKbId = moduleKbId(moduleName);
+
+                        const rawContent = moduleItems.map((it: KnowledgeItem) => `${it.title || ''} ${it.content || ''}`).join(' ');
+                        let previewText: React.ReactNode = rawContent.substring(0, 150) + '...';
+
+                        if (searchTerm) {
+                          const lowerContent = rawContent.toLowerCase();
+                          const termIdx = lowerContent.indexOf(searchTerm.toLowerCase());
+                          if (termIdx !== -1) {
+                            const start = Math.max(0, termIdx - 60);
+                            const end = Math.min(rawContent.length, termIdx + 60);
+                            const snippet = (start > 0 ? '...' : '') + rawContent.substring(start, end) + (end < rawContent.length ? '...' : '');
+                            previewText = highlightText(snippet, searchTerm);
+                          }
+                        } else if (moduleItems.length === 0) {
+                          previewText = 'Sem conteúdo.';
+                        }
 
                         return (
                           <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-900/80 transition-all gap-4">
@@ -481,7 +617,9 @@ export default function BaseConhecimentoPage() {
                                 <FileText className="w-4 h-4" />
                               </span>
                               <div className="min-w-0 flex-1">
-                                <h3 className="font-bold text-sm text-slate-100 truncate">{moduleName}</h3>
+                                <h3 className="font-bold text-sm text-slate-100 truncate">
+                                  {searchTerm ? highlightText(moduleName, searchTerm) : moduleName}
+                                </h3>
                                 <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono mt-0.5">
                                   <span>{moduleItems.length} tópico(s)</span>
                                   <span>•</span>
@@ -491,18 +629,18 @@ export default function BaseConhecimentoPage() {
                                     <span>Importado: <strong className="text-slate-200">{formatDate(createdAt)}</strong></span>
                                   )}
                                 </div>
-                                <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg" title={previewText}>
+                                <p className="text-[11px] text-slate-500 mt-1 truncate max-w-lg">
                                   {previewText}
                                 </p>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0">
                               {!autoSync && (
                                 <button
                                   onClick={() => handleSyncWithUmbler(moduleName, currentKbId)}
                                   disabled={syncingModule === moduleName}
-                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 text-xs font-bold transition-all cursor-pointer disabled:opacity-50 mr-2"
                                   title="Enviar p/ Umbler"
                                 >
                                   <RefreshCw className={`w-3.5 h-3.5 ${syncingModule === moduleName ? 'animate-spin' : ''}`} /> 
@@ -517,6 +655,15 @@ export default function BaseConhecimentoPage() {
                               >
                                 <Download className="w-4 h-4" />
                               </button>
+                              
+                              <button
+                                onClick={() => handleOpenBackups(moduleName)}
+                                title="Histórico de Backups"
+                                className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
+                              >
+                                <History className="w-4 h-4" />
+                              </button>
+
                               <button
                                 onClick={() => handleOpenEditor(moduleName)}
                                 title="Editar conteúdo"
@@ -543,7 +690,133 @@ export default function BaseConhecimentoPage() {
         )}
       </div>
 
-      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
+      {/* MODAL DE HISTÓRICO DE BACKUPS */}
+      {viewingBackups && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
+                  <History className="w-5 h-5 text-amber-400" /> Histórico de Versões
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Backups salvos automaticamente de: <span className="text-amber-300 font-semibold">{viewingBackups}</span></p>
+              </div>
+              <button onClick={() => setViewingBackups(null)} className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex flex-1 overflow-hidden">
+              {/* Barra lateral com as datas */}
+              <div className="w-64 border-r border-slate-800 bg-slate-900/30 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                {loadingBackups ? (
+                  <div className="text-center text-slate-500 text-xs py-10 flex flex-col items-center gap-2">
+                    <RefreshCw className="w-5 h-5 animate-spin text-amber-500" /> Carregando...
+                  </div>
+                ) : backupsList.length === 0 ? (
+                  <div className="text-center text-slate-500 text-xs py-10">
+                    Nenhum backup encontrado.
+                  </div>
+                ) : (
+                  backupsList.map((bkp, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedBackup(bkp)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                        selectedBackup?.id === bkp.id 
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
+                          : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-sm mb-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {new Date(bkp.createdAt).toLocaleDateString('pt-BR')}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        às {new Date(bkp.createdAt).toLocaleTimeString('pt-BR')}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              {/* Área de preview do backup */}
+              <div className="flex-1 bg-slate-950 p-6 flex flex-col">
+                {selectedBackup ? (
+                  <>
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">Preview do Arquivo</span>
+                      
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setBackupToDelete(selectedBackup.id)}
+                          className="flex items-center gap-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 px-3 py-2 rounded-lg text-xs font-bold transition-all border border-red-500/30 cursor-pointer"
+                          title="Apagar este backup para sempre"
+                        >
+                          <Trash2 className="w-4 h-4" /> Apagar
+                        </button>
+                        
+                        <button
+                          onClick={handleRestoreBackup}
+                          className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-amber-600/20 cursor-pointer"
+                        >
+                          <RefreshCw className="w-4 h-4" /> Carregar no Editor
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 bg-slate-900/90 border border-slate-800 rounded-xl p-5 text-sm text-slate-300 font-mono overflow-y-auto custom-scrollbar whitespace-pre-wrap">
+                      {selectedBackup.content}
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
+                    <FileText className="w-12 h-12 opacity-20" />
+                    <p className="text-sm font-medium">Selecione uma data na barra lateral para visualizar o conteúdo.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO PARA APAGAR BACKUP (NOVO) */}
+      {backupToDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-100">Apagar Backup</h3>
+                <p className="text-xs text-slate-400">Ação irreversível no banco de dados</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/50 p-4 rounded-xl border border-slate-800 font-medium">
+              Tem certeza que deseja apagar esta versão de backup <strong className="text-white">permanentemente</strong>? Você não poderá recuperá-la depois.
+            </p>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => setBackupToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteBackup}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-lg shadow-red-600/20 transition-all cursor-pointer"
+              >
+                Sim, Apagar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE MÓDULO */}
       {moduleToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">

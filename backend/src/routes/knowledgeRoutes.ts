@@ -19,14 +19,13 @@ function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// Reconstrói o .txt a partir dos itens salvos (mesmo formato usado no export-txt)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildTxtFromItems(items: any[]): string {
   let txtOutput = '';
   let lastSection = '';
   for (const item of items) {
     if (item.source?.includes('raw')) {
-      txtOutput += `${item.content}\n\n`;
+      txtOutput += `${item.content}\n`;
       continue;
     }
     if (item.section && item.section !== lastSection) {
@@ -34,23 +33,11 @@ function buildTxtFromItems(items: any[]): string {
       lastSection = item.section;
     }
     const titleFormat = item.title === 'Instrução' || item.title === 'Tópico' ? '' : `${item.title}: `;
-    txtOutput += `* ${titleFormat}${item.content}\n\n`;
+    txtOutput += `* ${titleFormat}${item.content}\n`;
   }
   return txtOutput.trim();
 }
 
-// Sincroniza com a Umbler sem derrubar a resposta local se der erro
-async function syncModuleToUmbler(moduleName: string, content: string, kbId?: string): Promise<boolean> {
-  try {
-    await UmblerService.syncKnowledgeDocument(`${moduleName}.txt`, content, kbId);
-    return true;
-  } catch (error: any) {
-    console.error(`Erro ao sincronizar "${moduleName}" com a Umbler:`, error.response?.data || error.message);
-    return false;
-  }
-}
-
-// Lista as bases de conhecimento da Umbler (pra escolher onde cada arquivo é salvo)
 router.get('/umbler-bases', async (_req: Request, res: Response) => {
   try {
     const bases = await UmblerService.listKnowledgeBases();
@@ -60,7 +47,53 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
   }
 });
 
-// 1. IMPORTAR ARQUIVO DE CONHECIMENTO (.TXT, .JSON, .SWAGGER)
+router.get('/module/:moduleName/backups', async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const backups = await db.collection('knowledgeBackups')
+      .find({ module: req.params.moduleName })
+      .sort({ createdAt: -1 })
+      .toArray();
+    return res.json(backups);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// NOVA ROTA: Apagar um backup específico
+router.delete('/backups/:id', async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    await db.collection('knowledgeBackups').deleteOne({ id: req.params.id });
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/sync-umbler', async (req: Request, res: Response) => {
+  try {
+    const { moduleName, knowledgeBaseId } = req.body;
+    if (!moduleName) return res.status(400).json({ error: 'Nome do módulo ausente.' });
+
+    const db = await getDb();
+    const items = await db.collection('knowledge').find({ module: moduleName }).sort({ section: 1, createdAt: 1 }).toArray();
+
+    if (items.length === 0) return res.status(404).json({ error: 'Módulo não encontrado no banco local.' });
+
+    const content = buildTxtFromItems(items);
+    await UmblerService.syncKnowledgeDocument(`${moduleName}.txt`, content, knowledgeBaseId);
+
+    return res.json({ success: true });
+  } catch (error: any) {
+    console.error(`Erro ao sincronizar "${req.body.moduleName}":`, error.response?.data || error.message);
+    if (error.response && error.response.status === 404) {
+       return res.status(404).json({ error: 'Nenhuma alteração nova para enviar.' });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 router.post('/upload-txt', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
@@ -91,7 +124,6 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     const itemsToSave: any[] = [];
     const nowIso = new Date().toISOString();
 
-    // Função que empacota o bloco inteiro de texto e salva no card
     function flushItem() {
       if (currentTitle.trim() || currentContent.trim()) {
         itemsToSave.push({
@@ -113,28 +145,20 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     for (const line of lines) {
       const trimmed = line.trim();
-      
-      // Preserva parágrafos vazios no meio do texto
       if (!trimmed) {
          if (currentContent) currentContent += '\n';
          continue;
       }
-
       if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
         flushItem();
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
-
-      // Só cria uma Sessão se tiver ESPAÇO depois do ## (Ex: "## Geral").
-      // "##Etapa1." não tem espaço, então será salvo como texto normal do cliente!
       if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
         flushItem();
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
-
-      // Sempre que acha um *, finaliza o bloco anterior e começa um novo
       if (trimmed.startsWith('*')) {
         hasStructuredItems = true;
         flushItem();
@@ -150,11 +174,8 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
         }
         continue;
       }
-
-      // Vai juntando todas as outras linhas ao conteúdo do card atual
       currentContent += trimmed + '\n';
     }
-    // Salva o último bloco no fim do loop
     flushItem();
 
     if (!hasStructuredItems && itemsToSave.length === 1) {
@@ -164,10 +185,9 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     }
 
     const db = await getDb();
-
-    // Se o módulo já existia numa base diferente, limpa o documento antigo lá antes de recriar
     const previousItems = await db.collection('knowledge').find({ module: currentModule }).toArray();
     const previousKbId = previousItems[0]?.knowledgeBaseId;
+    
     if (previousKbId && previousKbId !== knowledgeBaseId) {
       try {
         await UmblerService.deleteKnowledgeDocument(`${currentModule}.txt`, previousKbId);
@@ -176,21 +196,17 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
       }
     }
 
-    let umblerSynced = false;
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
-      umblerSynced = await syncModuleToUmbler(currentModule, buildTxtFromItems(itemsToSave), knowledgeBaseId);
     }
 
-    return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length, umblerSynced });
+    return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length, umblerSynced: false });
   } catch (error: any) {
-    console.error('Erro ao processar arquivo:', error);
     return res.status(500).json({ error: error.message || 'Erro ao processar arquivo.' });
   }
 });
 
-// 2. SALVAR EDIÇÃO MANUAL
 router.put('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const { moduleName } = req.params;
@@ -199,7 +215,22 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     if (!textContent) return res.status(400).json({ error: 'Conteúdo vazio.' });
 
     const db = await getDb();
-    const existingItems = await db.collection('knowledge').find({ module: moduleName }).sort({ createdAt: 1 }).toArray();
+    
+    const existingItems = await db.collection('knowledge')
+      .find({ module: moduleName })
+      .sort({ section: 1, createdAt: 1 })
+      .toArray();
+    
+    if (existingItems.length > 0) {
+      const oldText = buildTxtFromItems(existingItems);
+      await db.collection('knowledgeBackups').insertOne({
+        id: newId(),
+        module: moduleName,
+        content: oldText,
+        createdAt: new Date().toISOString()
+      });
+    }
+
     const createdAt = existingItems.length > 0 && existingItems[0].createdAt ? existingItems[0].createdAt : new Date().toISOString();
     const updatedAt = new Date().toISOString();
 
@@ -240,19 +271,16 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
          if (currentContent) currentContent += '\n';
          continue;
       }
-
       if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
         flushItem();
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
-
       if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
         flushItem();
         currentSection = trimmed.replace(/^#+\s*/, '');
         continue;
       }
-
       if (trimmed.startsWith('*')) {
         hasStructuredItems = true;
         flushItem();
@@ -268,7 +296,6 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
         }
         continue;
       }
-
       currentContent += trimmed + '\n';
     }
     flushItem();
@@ -279,7 +306,6 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
       itemsToSave[0].source = 'manual_raw';
     }
 
-    // Se a base de conhecimento mudou, limpa o documento na base antiga antes de recriar na nova
     if (previousKbId && previousKbId !== knowledgeBaseId) {
       try {
         await UmblerService.deleteKnowledgeDocument(`${moduleName}.txt`, previousKbId);
@@ -289,19 +315,17 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     }
 
     await db.collection('knowledge').deleteMany({ module: moduleName });
-    let umblerSynced = false;
+    
     if (itemsToSave.length > 0) {
       await db.collection('knowledge').insertMany(itemsToSave);
-      umblerSynced = await syncModuleToUmbler(moduleName, buildTxtFromItems(itemsToSave), knowledgeBaseId);
     }
 
-    return res.json({ success: true, totalItems: itemsToSave.length, umblerSynced });
+    return res.json({ success: true, totalItems: itemsToSave.length, umblerSynced: false });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 });
 
-// 3. EXPORTAR MÓDULO EM .TXT
 router.get('/export-txt', async (req: Request, res: Response) => {
   try {
     const moduleName = req.query.moduleName ? String(req.query.moduleName) : null;
@@ -327,7 +351,6 @@ router.get('/export-txt', async (req: Request, res: Response) => {
   }
 });
 
-// 4. DELETAR MÓDULO OU ITEM
 router.delete('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
@@ -335,6 +358,7 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
     const knowledgeBaseId = existingItems[0]?.knowledgeBaseId;
 
     await db.collection('knowledge').deleteMany({ module: req.params.moduleName });
+    await db.collection('knowledgeBackups').deleteMany({ module: req.params.moduleName });
 
     let umblerSynced = false;
     try {
@@ -350,7 +374,6 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
   }
 });
 
-// 5. RETORNAR MÓDULOS E ITENS
 router.get('/modules', async (_req: Request, res: Response) => {
   try {
     const db = await getDb();
