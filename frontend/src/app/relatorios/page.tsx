@@ -23,7 +23,7 @@ interface QualityData {
   avgRating: string | number | null; 
   byDay: DailyRow[]; 
   byCarteira: CarteiraRow[];
-  reasonsDistribution?: { id: string, name: string, count: number }[]; // NOVO: Trazido pelo Backend
+  reasonsDistribution?: { id: string, name: string, count: number }[];
 }
 interface ValueData { 
   qaGenerated: number; 
@@ -84,7 +84,9 @@ function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
           <div key={i} className="group relative w-full z-10 hover:z-50">
             <div className="flex justify-between items-baseline gap-3 text-xs mb-1.5">
               <span className="text-slate-300 font-semibold truncate min-w-0">{label}</span>
-              <span className="text-slate-400 font-mono shrink-0 whitespace-nowrap">{r.total} audits</span>
+              <span className="text-slate-400 font-mono shrink-0 whitespace-nowrap">
+                {r.total} {r.total === 1 ? 'auditoria' : 'auditorias'}
+              </span>
             </div>
             <div className="h-4 bg-slate-950 rounded-full overflow-hidden border border-slate-800/80 shadow-inner w-full flex">
               <div className="h-full bg-blue-600 relative transition-all duration-500 flex" style={{ width: `${pct}%` }}>
@@ -178,7 +180,7 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState(getToday());
 
   useEffect(() => {
-    document.title = 'Auditoria Ágape';
+    document.title = 'Relatórios de BI · Auditoria Ágape';
     const load = async () => {
       if (!startDate || !endDate) return;
 
@@ -314,7 +316,9 @@ export default function ReportsPage() {
                       <div key={i} className="bg-slate-950/50 border border-slate-800/80 rounded-xl p-3 flex justify-between items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-slate-200 truncate">{b.subtopicName ? `${b.topicName} > ${b.subtopicName}` : b.topicName}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">{b.kbFailCount} falhas em {b.total} respostas</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {b.kbFailCount} {b.kbFailCount === 1 ? 'falha' : 'falhas'} em {b.total} {b.total === 1 ? 'resposta' : 'respostas'}
+                          </div>
                         </div>
                         <div className="shrink-0 bg-red-500/10 border border-red-500/20 text-red-400 font-black text-sm px-2.5 py-1 rounded-lg">
                           {Math.round(b.errorRate * 100)}%
@@ -388,7 +392,6 @@ export default function ReportsPage() {
                 </div>
               </div>
 
-              {/* ITEM 2: Motivos de Falha (RANKING DINÂMICO COMPLETAMENTE NOVO) */}
               <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 shadow-xl flex flex-col">
                 <div className="mb-5">
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -408,10 +411,7 @@ export default function ReportsPage() {
                       
                       return (
                         <div key={r.id} className="relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-slate-600 transition-all">
-                          {/* Efeito "Water Level" (Background de progresso inline) */}
                           <div className="absolute left-0 top-0 bottom-0 bg-purple-500/15 transition-all duration-1000" style={{ width: `${pct}%` }}></div>
-                          
-                          {/* Linha indicadora lateral neon */}
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
 
                           <div className="flex items-center gap-3 z-10 pl-2 min-w-0">
@@ -422,7 +422,9 @@ export default function ReportsPage() {
                           </div>
                           <div className="z-10 flex items-center gap-1.5 shrink-0 pl-3">
                             <span className="text-sm font-black text-white">{r.count}</span>
-                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">falhas</span>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                              {r.count === 1 ? 'falha' : 'falhas'}
+                            </span>
                           </div>
                         </div>
                       );
@@ -452,7 +454,9 @@ export default function ReportsPage() {
                         <div key={i} className="flex justify-between items-center bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
                           <div>
                             <div className="text-xs font-bold text-slate-200">{c.carteira}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">{c.total} chats auditados</div>
+                            <div className="text-[10px] text-slate-500 mt-0.5">
+                              {c.total} {c.total === 1 ? 'chat auditado' : 'chats auditados'}
+                            </div>
                           </div>
                           <div className={`px-2.5 py-1 rounded-lg border font-black text-xs ${color}`}>
                             {conformityPct}%

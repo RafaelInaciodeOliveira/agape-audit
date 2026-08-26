@@ -104,28 +104,27 @@ export default function BaseConhecimentoPage() {
     return acc;
   }, {});
 
-  if (!isAuthorized) {
-    return <div className="h-screen w-screen bg-slate-950"></div>;
-  }
-
+  // --- NOVA LÓGICA DE SINCRONIZAÇÃO COM TRATAMENTO DO ERRO 404 ---
   const handleSyncWithUmbler = async (moduleName: string, kbId: string) => {
     setSyncingModule(moduleName);
-    const promise = axios.post(`${API_URL}/knowledge/sync-umbler`, {
-      moduleName,
-      knowledgeBaseId: kbId
-    });
+    const toastId = toast.loading(`Enviando "${moduleName}" para a Umbler...`);
 
-    toast.promise(promise, {
-      loading: `Enviando "${moduleName}" para a Umbler...`,
-      success: () => {
-        setSyncingModule(null);
-        return 'Enviado com sucesso!';
-      },
-      error: () => {
-        setSyncingModule(null);
-        return 'Erro ao enviar. Verifique os logs do servidor.';
-      },
-    });
+    try {
+      await axios.post(`${API_URL}/knowledge/sync-umbler`, {
+        moduleName,
+        knowledgeBaseId: kbId
+      });
+      toast.success('Enviado e sincronizado com sucesso!', { id: toastId });
+    } catch (error) {
+      // Usamos axios.isAxiosError para o TypeScript saber o formato exato do erro sem usar "any"
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        toast.info('Tudo certo! O arquivo já está atualizado na Umbler (nenhuma alteração nova para enviar).', { id: toastId });
+      } else {
+        toast.error('Erro ao enviar. Verifique os logs do servidor.', { id: toastId });
+      }
+    } finally {
+      setSyncingModule(null);
+    }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -237,6 +236,10 @@ export default function BaseConhecimentoPage() {
     toast.info(`Baixando ${modules.length} arquivos separadamente...`);
   };
 
+  if (!isAuthorized) {
+    return <div className="h-screen w-screen bg-slate-950"></div>;
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans overflow-x-hidden">
       <Toaster theme="dark" position="top-right" richColors />
@@ -288,7 +291,6 @@ export default function BaseConhecimentoPage() {
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <Database className="w-3 h-3" /> Novo arquivo vai para:
               </span>
-              {/* Largura aumentada para w-[220px] para caber o texto completo */}
               <select
                 value={currentUploadKbId}
                 onChange={(e) => setUploadKbId(e.target.value)}
@@ -348,11 +350,9 @@ export default function BaseConhecimentoPage() {
           </div>
         ) : viewMode === 'grid' ? (
           <div className="space-y-8">
-            {/* Ordena as Bases de Conhecimento (Tópicos) de A a Z */}
             {Object.entries(groupedModules)
               .sort(([kbNameA], [kbNameB]) => kbNameA.localeCompare(kbNameB))
               .map(([kbName, moduleNames]) => {
-                // Ordena os Módulos (Arquivos) de A a Z
                 const sortedModules = [...moduleNames].sort((a, b) => a.localeCompare(b));
 
                 return (
@@ -454,7 +454,6 @@ export default function BaseConhecimentoPage() {
           </div>
         ) : (
           <div className="space-y-8">
-            {/* Aplica a mesma ordenação de A a Z na visualização em Lista */}
             {Object.entries(groupedModules)
               .sort(([kbNameA], [kbNameB]) => kbNameA.localeCompare(kbNameB))
               .map(([kbName, moduleNames]) => {
