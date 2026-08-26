@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
-  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, Clock
+  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, Clock, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -71,6 +71,10 @@ export default function BaseConhecimentoPage() {
   
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Estados dos Dropdowns Customizados
+  const [isKbDropdownOpen, setIsKbDropdownOpen] = useState(false);
+  const [isEditKbDropdownOpen, setIsEditKbDropdownOpen] = useState(false);
+
   // Estados do Histórico de Backups
   const [viewingBackups, setViewingBackups] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,7 +82,7 @@ export default function BaseConhecimentoPage() {
   const [loadingBackups, setLoadingBackups] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedBackup, setSelectedBackup] = useState<any | null>(null);
-  const [backupToDelete, setBackupToDelete] = useState<string | null>(null); // NOVO: Estado para a modal de apagar backup
+  const [backupToDelete, setBackupToDelete] = useState<string | null>(null);
 
   const [uploadKbId, setUploadKbId] = useState('');
   const [autoSync, setAutoSync] = useState(false);
@@ -294,7 +298,6 @@ export default function BaseConhecimentoPage() {
     toast.info('Texto do backup carregado! Revise e clique em "Salvar Alterações" para confirmar.');
   };
 
-  // Lógica atualizada para usar a nova modal
   const confirmDeleteBackup = async () => {
     if (!backupToDelete) return;
     
@@ -333,11 +336,12 @@ export default function BaseConhecimentoPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            <div className="truncate">
-              <h1 className="text-xl md:text-2xl font-bold text-blue-400 flex items-center gap-2 truncate">
+            {/* Título sem o truncate para evitar o corte das letras */}
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-blue-400 flex items-center gap-2">
                 <BookOpen className="w-6 h-6 shrink-0" /> Central da Base de Conhecimento
               </h1>
-              <p className="text-[10px] md:text-xs text-slate-400 mt-1 truncate">
+              <p className="text-[10px] md:text-xs text-slate-400 mt-1">
                 Gerencie, treine via auditorias e envie os arquivos para a Umbler.
               </p>
             </div>
@@ -373,25 +377,43 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-1 shrink-0 hidden sm:flex">
+            {/* DROPDOWN CUSTOMIZADO: Seleção de Base */}
+            <div className="flex flex-col gap-1 shrink-0 hidden sm:flex relative z-40">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <Database className="w-3 h-3" /> Novo arquivo vai para:
               </span>
-              <select
-                value={currentUploadKbId}
-                onChange={(e) => setUploadKbId(e.target.value)}
-                className="bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-1.5 text-xs font-medium text-blue-300 outline-none cursor-pointer w-[180px]"
+              <button
+                onClick={() => setIsKbDropdownOpen(!isKbDropdownOpen)}
+                className="flex items-center justify-between bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-1.5 text-xs font-medium text-blue-300 outline-none cursor-pointer w-[220px] hover:bg-slate-800 transition-all shadow-sm"
               >
-                <option value="" disabled className="bg-slate-900 text-slate-500">Selecione uma base...</option>
-                {activeBases.map((kb) => (
-                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200 truncate">
-                    {kbLabel(kb)}
-                  </option>
-                ))}
-              </select>
+                <span className="truncate">{currentUploadKbId ? kbNameById(currentUploadKbId)?.name : 'Selecione uma base...'}</span>
+                <ChevronDown className="w-4 h-4 ml-2 shrink-0 text-blue-400" />
+              </button>
+
+              {isKbDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setIsKbDropdownOpen(false)}></div>
+                  <div className="absolute top-[105%] left-0 w-[220px] bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-100">
+                    {activeBases.map((kb) => (
+                      <button
+                        key={kb.id}
+                        onClick={() => {
+                          setUploadKbId(kb.id);
+                          setIsKbDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 text-xs font-medium transition-all hover:bg-slate-700 ${
+                          currentUploadKbId === kb.id ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300'
+                        }`}
+                      >
+                        {kbLabel(kb)}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
-            <label className="flex flex-col gap-1 cursor-pointer group shrink-0 hidden sm:flex">
+            <label className="flex flex-col gap-1 cursor-pointer group shrink-0 hidden sm:flex ml-2 mr-1">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <RefreshCw className={`w-3 h-3 ${autoSync ? 'text-emerald-400' : 'text-slate-500'}`} /> Envio Auto
               </span>
@@ -406,25 +428,29 @@ export default function BaseConhecimentoPage() {
               </div>
             </label>
 
-            <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer shadow-lg shadow-blue-600/20 transition-all shrink-0">
-              <Upload className="w-4 h-4" />
-              {uploading ? 'Importando...' : 'Subir'}
-              <input
-                type="file"
-                accept=".txt,.json,.yaml,.yml"
-                onChange={handleFileUpload}
-                disabled={uploading}
-                className="hidden"
-              />
-            </label>
+            {/* BOTÕES EMPILHADOS PARA ECONOMIZAR ESPAÇO */}
+            <div className="flex flex-col gap-2 shrink-0 w-36">
+              <label className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] cursor-pointer shadow-lg shadow-blue-600/20 transition-all w-full">
+                <Upload className="w-3.5 h-3.5" />
+                {uploading ? 'Importando...' : 'Subir'}
+                <input
+                  type="file"
+                  accept=".txt,.json,.yaml,.yml"
+                  onChange={handleFileUpload}
+                  disabled={uploading}
+                  className="hidden"
+                />
+              </label>
 
-            <button
-              onClick={handleDownloadAllIndividual}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-xs transition-all cursor-pointer shrink-0"
-            >
-              <FolderDown className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:block">Baixar Todos</span>
-            </button>
+              <button
+                onClick={handleDownloadAllIndividual}
+                className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold text-[11px] transition-all cursor-pointer w-full"
+              >
+                <FolderDown className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Baixar Todos</span>
+              </button>
+            </div>
+
           </div>
         </div>
 
@@ -707,7 +733,6 @@ export default function BaseConhecimentoPage() {
             </div>
 
             <div className="flex flex-1 overflow-hidden">
-              {/* Barra lateral com as datas */}
               <div className="w-64 border-r border-slate-800 bg-slate-900/30 overflow-y-auto custom-scrollbar p-4 space-y-2">
                 {loadingBackups ? (
                   <div className="text-center text-slate-500 text-xs py-10 flex flex-col items-center gap-2">
@@ -740,7 +765,6 @@ export default function BaseConhecimentoPage() {
                 )}
               </div>
 
-              {/* Área de preview do backup */}
               <div className="flex-1 bg-slate-950 p-6 flex flex-col">
                 {selectedBackup ? (
                   <>
@@ -780,7 +804,7 @@ export default function BaseConhecimentoPage() {
         </div>
       )}
 
-      {/* MODAL DE CONFIRMAÇÃO PARA APAGAR BACKUP (NOVO) */}
+      {/* MODAL DE CONFIRMAÇÃO PARA APAGAR BACKUP */}
       {backupToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
@@ -876,18 +900,41 @@ export default function BaseConhecimentoPage() {
               <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider font-mono">
                 <Database className="w-3.5 h-3.5 text-blue-400" /> Este arquivo pertence à base:
               </label>
-              <select
-                value={editKbId}
-                onChange={(e) => setEditKbId(e.target.value)}
-                className="w-full bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer"
-              >
-                {activeBases.map((kb) => (
-                  <option key={kb.id} value={kb.id} className="bg-slate-900 text-slate-200">
-                    {kbLabel(kb)}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-500 mt-1">
+              
+              {/* DROPDOWN CUSTOMIZADO: Seleção de Base (Modal de Edição) */}
+              <div className="relative z-40">
+                <button
+                  onClick={() => setIsEditKbDropdownOpen(!isEditKbDropdownOpen)}
+                  className="flex items-center justify-between w-full bg-slate-900 border border-blue-500/40 rounded-xl px-3 py-2 text-xs font-medium text-blue-300 outline-none cursor-pointer hover:bg-slate-800 transition-all shadow-sm"
+                >
+                  <span className="truncate">{editKbId ? kbNameById(editKbId)?.name : 'Selecione uma base...'}</span>
+                  <ChevronDown className="w-4 h-4 ml-2 shrink-0 text-blue-400" />
+                </button>
+
+                {isEditKbDropdownOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setIsEditKbDropdownOpen(false)}></div>
+                    <div className="absolute top-[105%] left-0 w-full bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-100">
+                      {activeBases.map((kb) => (
+                        <button
+                          key={kb.id}
+                          onClick={() => {
+                            setEditKbId(kb.id);
+                            setIsEditKbDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 text-xs font-medium transition-all hover:bg-slate-700 ${
+                            editKbId === kb.id ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300'
+                          }`}
+                        >
+                          {kbLabel(kb)}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <p className="text-[10px] text-slate-500 mt-2">
                 Trocar aqui e salvar move o arquivo de base na Umbler (remove da antiga, cria na nova).
               </p>
             </div>
