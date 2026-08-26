@@ -23,7 +23,7 @@ interface Subtopic { id: string; name: string; }
 interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
 interface FailReason { id: string; name: string; }
 interface Attendant { id: string; name: string; }
-interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; }
+interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; topicId?: string; subtopicId?: string; } // NOVO: topic e subtopic geral
 interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
 interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
@@ -210,8 +210,6 @@ export default function AuditDashboard() {
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Ref para o dropdown customizado
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [displayedCount, setDisplayedCount] = useState(30); 
@@ -219,7 +217,7 @@ export default function AuditDashboard() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false); // NOVO ESTADO
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [statusTab, setStatusTab] = useState('abertos');
   
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -230,7 +228,10 @@ export default function AuditDashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
+  // ESTADOS DA AVALIAÇÃO GERAL
   const [rating, setRating] = useState(0);
+  const [generalTopicId, setGeneralTopicId] = useState(''); // NOVO
+  const [generalSubtopicId, setGeneralSubtopicId] = useState(''); // NOVO
   const [generalFailReasons, setGeneralFailReasons] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
   
@@ -273,7 +274,6 @@ export default function AuditDashboard() {
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
   const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher);
 
-  // Fecha o dropdown se clicar fora dele
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -402,11 +402,15 @@ export default function AuditDashboard() {
     setLoadingMessages(true);
 
     if (chat.audit) {
-      setRating(chat.audit.rating || 0); 
+      setRating(chat.audit.rating || 0);
+      setGeneralTopicId(chat.audit.topicId || '');       // CARREGA TÓPICO GERAL
+      setGeneralSubtopicId(chat.audit.subtopicId || ''); // CARREGA SUBTÓPICO GERAL
       setGeneralFailReasons(chat.audit.failReasons || []);
       setFeedback(chat.audit.auditorFeedback || '');
     } else {
       setRating(0);
+      setGeneralTopicId('');
+      setGeneralSubtopicId('');
       setGeneralFailReasons([]);
       setFeedback('');
     }
@@ -477,6 +481,8 @@ export default function AuditDashboard() {
       clientName: selectedChat.contactName,
       carteiraTag: selectedChat.carteiraTag,
       rating: finalRating,
+      topicId: generalTopicId || null,       // SALVA O TÓPICO GERAL
+      subtopicId: generalSubtopicId || null, // SALVA O SUBTÓPICO GERAL
       failReasons: generalFailReasons,
       auditorFeedback: feedback,
       auditorEmail: 'auditor@prover.com.br',
@@ -488,7 +494,7 @@ export default function AuditDashboard() {
         mutateChats(); 
         setSelectedChat(prev => prev ? {
           ...prev, 
-          audit: { ...prev.audit, rating: finalRating, failReasons: generalFailReasons, auditorFeedback: feedback, violatedPromptRules: false, knowledgeBaseFail: false }
+          audit: { ...prev.audit, rating: finalRating, topicId: generalTopicId || undefined, subtopicId: generalSubtopicId || undefined, failReasons: generalFailReasons, auditorFeedback: feedback, violatedPromptRules: false, knowledgeBaseFail: false }
         } : null);
         return 'Auditoria geral salva com sucesso!';
       },
@@ -560,7 +566,6 @@ export default function AuditDashboard() {
     });
   };
 
-  // --- CRUD TÓPICOS ---
   const handleAddTopic = async () => {
     if (!newTopicName.trim()) return;
     await axios.post(`${API_URL}/topics`, { name: newTopicName.trim() });
@@ -597,7 +602,6 @@ export default function AuditDashboard() {
     mutateTopics();
   };
 
-  // --- CRUD MOTIVOS DE ERRO ---
   const handleAddReason = async () => {
     if (!newReasonName.trim()) return;
     await axios.post(`${API_URL}/fail-reasons`, { name: newReasonName.trim() });
@@ -791,7 +795,6 @@ export default function AuditDashboard() {
           
           <div className="flex items-center gap-2">
             
-            {/* DROPDOWN CUSTOMIZADO DE ATENDENTES */}
             <div className="flex-1 relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -1025,7 +1028,7 @@ export default function AuditDashboard() {
                   {selectedChat.audit?.rating && selectedChat.audit.rating > 0 ? (
                     <>
                       <Pencil className="w-3.5 h-3.5" />
-                      Editar avaliação ({selectedChat.audit.rating}★)
+                      Editar avaliação ({selectedChat.audit.rating})
                     </>
                   ) : selectedChat.audit ? (
                     <>
@@ -1375,6 +1378,37 @@ export default function AuditDashboard() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* NOVA SESSÃO: Tópicos da Avaliação Geral */}
+            <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-800/80">
+              <div>
+                <label className="block text-sm font-bold text-slate-300 mb-1.5">Tópico</label>
+                <select
+                  value={generalTopicId}
+                  onChange={(e) => { setGeneralTopicId(e.target.value); setGeneralSubtopicId(''); }}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer transition-all"
+                >
+                  <option value="">Selecione...</option>
+                  {topics.map((t: Topic) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-300 mb-1.5">Subtópico</label>
+                <select
+                  value={generalSubtopicId}
+                  onChange={(e) => setGeneralSubtopicId(e.target.value)}
+                  disabled={!generalTopicId}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40 transition-all"
+                >
+                  <option value="">-</option>
+                  {(topics.find((t: Topic) => t.id === generalTopicId)?.subtopics || []).map((s: Subtopic) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
 

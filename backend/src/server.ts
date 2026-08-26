@@ -219,9 +219,10 @@ app.get('/api/chats/:id/messages', async (req, res) => {
   } catch { res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' }); }
 });
 
+// NOVA LÓGICA: Salva Tópico e Subtópico na Auditoria Geral
 app.post('/api/audits', async (req, res) => {
   try {
-    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail } = req.body;
+    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = req.body;
     const db = await getDb();
     
     let isViolated = violatedPromptRules ? 1 : 0;
@@ -237,6 +238,8 @@ app.post('/api/audits', async (req, res) => {
       {
         $set: {
           chatId, clientName, carteiraTag, rating,
+          topicId: topicId || null,
+          subtopicId: subtopicId || null,
           failReasons: failReasons || [],
           violatedPromptRules: isViolated,
           knowledgeBaseFail: isKbFail,
@@ -370,7 +373,6 @@ app.post('/api/message-audits', async (req, res) => {
     let generatedQa = 0;
     const db = await getDb();
 
-    // Mantém a compatibilidade com gráficos antigos
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
 
@@ -379,7 +381,6 @@ app.post('/api/message-audits', async (req, res) => {
        isKbFail = failReasons.includes('reason_kb_fail') ? 1 : 0;
     }
 
-    // NOVA LÓGICA: Salva APENAS na nossa Base de Conhecimento interna
     if (trainAi && qaQuestion && qaAnswer) {
       await db.collection('knowledge').insertOne({
         id: newId(),
@@ -414,12 +415,10 @@ app.post('/api/message-audits', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) { 
-    console.error('Erro na rota message-audits:', error);
-    res.status(500).json({ error: error.message }); 
-  }
+  } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// NOVA LÓGICA: Combina Avaliações Gerais e de Mensagem para o Relatório de Temas
 app.get('/api/reports/themes', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -429,16 +428,23 @@ app.get('/api/reports/themes', async (req, res) => {
     }
 
     const db = await getDb();
-    const [audits, topics, subtopics] = await Promise.all([
+    const [msgAudits, chatAudits, topics, subtopics] = await Promise.all([
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
+      db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('topics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('subtopics').find({}, { projection: { _id: 0 } }).toArray(),
     ]);
     const topicById = new Map(topics.map((t: any) => [t.id, t.name]));
     const subtopicById = new Map(subtopics.map((s: any) => [s.id, s.name]));
 
+    // Junta as auditorias de mensagens com as auditorias gerais
+    const allAudits = [...msgAudits, ...chatAudits];
+
     const groups = new Map<string, any>();
-    for (const a of audits) {
+    for (const a of allAudits) {
+      // Ignora se for uma avaliação geral sem tópico
+      if (!a.messageId && !a.topicId && !a.subtopicId) continue;
+
       const key = `${a.topicId || ''}::${a.subtopicId || ''}`;
       if (!groups.has(key)) {
         groups.set(key, {
@@ -457,7 +463,6 @@ app.get('/api/reports/themes', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// AQUI ESTÁ A MÁGICA: O SERVIDOR AGORA GERA O RANKING DINÂMICO DE MOTIVOS DE ERRO
 app.get('/api/reports/quality', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -502,7 +507,6 @@ app.get('/api/reports/quality', async (req, res) => {
     }
     const byCarteira = Array.from(byCarteiraMap.values()).sort((a, b) => b.total - a.total);
 
-    // Lógica para Ranking Dinâmico de Motivos
     const reasonMap = new Map(allReasons.map((r: any) => [r.id, r.name]));
     const reasonCounts = new Map<string, number>();
 
@@ -513,7 +517,6 @@ app.get('/api/reports/quality', async (req, res) => {
              reasonCounts.set(rId, (reasonCounts.get(rId) || 0) + 1);
            }
          } else {
-           // Resgate seguro para dados antigos (antes da atualização de hoje)
            if (item.violatedPromptRules) reasonCounts.set('reason_violation', (reasonCounts.get('reason_violation') || 0) + 1);
            if (item.knowledgeBaseFail) reasonCounts.set('reason_kb_fail', (reasonCounts.get('reason_kb_fail') || 0) + 1);
          }
@@ -577,6 +580,7 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
+// NOVA LÓGICA: Adiciona o Tópico e Subtópico da Avaliação Geral no CSV
 app.get('/api/reports/export', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -627,7 +631,9 @@ app.get('/api/reports/export', async (req, res) => {
         r.clientName || 'Desconhecido',
         r.carteiraTag || '-',
         r.rating ? `${r.rating} Estrelas` : 'Sem nota',
-        '-', '-', '-',
+        r.topicId ? topicById.get(r.topicId) : '-', // AGORA PUXA O TÓPICO
+        r.subtopicId ? subtopicById.get(r.subtopicId) : '-', // AGORA PUXA O SUBTÓPICO
+        '-',
         formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
         r.auditorFeedback || '-',
         '-'
@@ -667,29 +673,20 @@ app.post('/api/webhooks/strapi', async (req, res) => {
   try {
     const { event, entry } = req.body;
 
-    // Dispara apenas quando um artigo for criado, atualizado ou publicado
     if (event === 'entry.create' || event === 'entry.publish' || event === 'entry.update') {
-      
-      // Tenta puxar o título e conteúdo usando os nomes de campos mais comuns do Strapi
       const title = entry?.title || entry?.titulo || entry?.name || 'Nova Atualização do Sistema';
       const content = entry?.content || entry?.conteudo || entry?.description || entry?.texto || '';
 
-      // Se o Strapi mandar um aviso sem texto, a gente ignora para não sujar a base
-      if (!content) {
-        return res.status(400).json({ error: 'Artigo sem conteúdo, ignorado.' });
-      }
+      if (!content) return res.status(400).json({ error: 'Artigo sem conteúdo, ignorado.' });
 
-      // Monta o formato amigável para a IA ler
       const qaQuestion = `Quais são as novidades sobre: ${title}?`;
       const qaAnswer = `Sobre a novidade "${title}":\n\n${content}`;
 
       const db = await getDb();
-      
-      // Salva direto na central de Base de Conhecimento local
       await db.collection('knowledge').insertOne({
         id: newId(),
-        module: 'Novidades Prover', // Cria/Usa o TXT "Novidades Prover"
-        section: 'Base Geral de Conhecimento', // Coloca na categoria correta
+        module: 'Novidades Prover',
+        section: 'Base Geral de Conhecimento',
         title: qaQuestion,
         content: qaAnswer,
         source: 'strapi_webhook',
