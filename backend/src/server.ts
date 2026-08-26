@@ -370,6 +370,7 @@ app.post('/api/message-audits', async (req, res) => {
     let generatedQa = 0;
     const db = await getDb();
 
+    // Mantém a compatibilidade com gráficos antigos
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
 
@@ -378,9 +379,8 @@ app.post('/api/message-audits', async (req, res) => {
        isKbFail = failReasons.includes('reason_kb_fail') ? 1 : 0;
     }
 
+    // NOVA LÓGICA: Salva APENAS na nossa Base de Conhecimento interna
     if (trainAi && qaQuestion && qaAnswer) {
-      await UmblerService.createKnowledgeBaseQA(qaQuestion, qaAnswer);
-      
       await db.collection('knowledge').insertOne({
         id: newId(),
         module: targetModule || 'Módulo Geral',
@@ -414,7 +414,10 @@ app.post('/api/message-audits', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error: any) { 
+    console.error('Erro na rota message-audits:', error);
+    res.status(500).json({ error: error.message }); 
+  }
 });
 
 app.get('/api/reports/themes', async (req, res) => {
