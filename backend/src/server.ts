@@ -702,6 +702,53 @@ app.post('/api/webhooks/strapi', async (req, res) => {
   }
 });
 
+// --- ROTA DO DASHBOARD DE BOAS-VINDAS ---
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const db = await getDb();
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const newStrapiRules = await db.collection('knowledge').countDocuments({
+      source: 'strapi_webhook',
+      createdAt: { $gte: yesterday }
+    });
+
+    const recentAudits = await db.collection('audits').find({
+      createdAt: { $gte: lastWeek }
+    }).toArray();
+    const ratings = recentAudits.map((a: any) => a.rating).filter((r: any) => typeof r === 'number');
+    const weeklyAvgRating = ratings.length > 0 ? (ratings.reduce((a: number,b: number)=>a+b,0)/ratings.length).toFixed(1) : '0.0';
+
+    const { items: openChats } = await UmblerService.getChats({ chatState: 'Open' });
+    const auditedList = await db.collection('audits').find({}, { projection: { chatId: 1 } }).toArray();
+    const auditedSet = new Set(auditedList.map((a: any) => a.chatId));
+    
+    // FILTRO CORRIGIDO: Só conta chats em aberto que o Ágape participou e que não foram auditados
+    const pendingChats = (openChats || []).filter((chat: any) => {
+      // Se já foi auditado, ignora
+      if (auditedSet.has(chat.id)) return false;
+
+      // Verifica se o Ágape está no histórico do chat
+      const chatMembers = [
+        ...(chat.organizationMembers || []),
+        ...(chat.organizationMemberHistory || []).map((h: any) => ({ id: h.memberId })),
+      ];
+      const hasAgapeInteracted =
+        chatMembers.some((m: any) => m?.id === AGAPE_MEMBER_ID) ||
+        chat.organizationMember?.id === AGAPE_MEMBER_ID ||
+        chat.lastOrganizationMember?.id === AGAPE_MEMBER_ID;
+
+      return hasAgapeInteracted;
+    }).length;
+
+    res.json({ newStrapiRules, weeklyAvgRating, pendingChats, auditsThisWeek: ratings.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor Restaurado e Mongoose Conectado na porta ${PORT}!`);

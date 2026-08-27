@@ -23,7 +23,7 @@ interface Subtopic { id: string; name: string; }
 interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
 interface FailReason { id: string; name: string; }
 interface Attendant { id: string; name: string; }
-interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; topicId?: string; subtopicId?: string; } // NOVO: topic e subtopic geral
+interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; topicId?: string; subtopicId?: string; }
 interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
 interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
@@ -223,6 +223,10 @@ export default function AuditDashboard() {
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
   
+  // ESTADOS DO DASHBOARD DE BOAS VINDAS (NOVO)
+  const [showWelcome, setShowWelcome] = useState(false);
+  const { data: dashboardData } = useSWR(showWelcome ? `${API_URL}/dashboard` : null, fetcher);
+
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -230,8 +234,8 @@ export default function AuditDashboard() {
 
   // ESTADOS DA AVALIAÇÃO GERAL
   const [rating, setRating] = useState(0);
-  const [generalTopicId, setGeneralTopicId] = useState(''); // NOVO
-  const [generalSubtopicId, setGeneralSubtopicId] = useState(''); // NOVO
+  const [generalTopicId, setGeneralTopicId] = useState(''); 
+  const [generalSubtopicId, setGeneralSubtopicId] = useState(''); 
   const [generalFailReasons, setGeneralFailReasons] = useState<string[]>([]);
   const [feedback, setFeedback] = useState('');
   
@@ -273,6 +277,17 @@ export default function AuditDashboard() {
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
   const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher);
+
+  // EFEITO DO DASHBOARD: Verifica se é o primeiro acesso do dia
+  useEffect(() => {
+    setTimeout(() => {
+      const today = new Date().toLocaleDateString('pt-BR');
+      const lastSeen = localStorage.getItem('agape_welcome_seen');
+      if (lastSeen !== today) {
+        setShowWelcome(true);
+      }
+    }, 10); // Atraso imperceptível de 10ms para evitar o render em cascata
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -403,8 +418,8 @@ export default function AuditDashboard() {
 
     if (chat.audit) {
       setRating(chat.audit.rating || 0);
-      setGeneralTopicId(chat.audit.topicId || '');       // CARREGA TÓPICO GERAL
-      setGeneralSubtopicId(chat.audit.subtopicId || ''); // CARREGA SUBTÓPICO GERAL
+      setGeneralTopicId(chat.audit.topicId || '');
+      setGeneralSubtopicId(chat.audit.subtopicId || '');
       setGeneralFailReasons(chat.audit.failReasons || []);
       setFeedback(chat.audit.auditorFeedback || '');
     } else {
@@ -481,8 +496,8 @@ export default function AuditDashboard() {
       clientName: selectedChat.contactName,
       carteiraTag: selectedChat.carteiraTag,
       rating: finalRating,
-      topicId: generalTopicId || null,       // SALVA O TÓPICO GERAL
-      subtopicId: generalSubtopicId || null, // SALVA O SUBTÓPICO GERAL
+      topicId: generalTopicId || null,
+      subtopicId: generalSubtopicId || null,
       failReasons: generalFailReasons,
       auditorFeedback: feedback,
       auditorEmail: 'auditor@prover.com.br',
@@ -627,6 +642,67 @@ export default function AuditDashboard() {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
+
+      {/* --- DASHBOARD DE BOAS-VINDAS (NOVO) --- */}
+      {showWelcome && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-4xl w-full shadow-2xl flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
+            <div className="w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center mb-5 shadow-inner">
+              <ShieldCheck className="w-8 h-8 text-blue-400" />
+            </div>
+            
+            <h2 className="text-2xl md:text-3xl font-black text-slate-100 mb-2">Resumo da Operação Diária</h2>
+            <p className="text-slate-400 mb-8 text-center max-w-lg text-sm">
+              Bom dia! Antes de iniciar as auditorias, confira como está a saúde do sistema e do Ágape hoje.
+            </p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full mb-8">
+              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
+                <Clock className="w-6 h-6 text-amber-400 mb-3" />
+                <span className="text-3xl font-black text-slate-100">
+                  {dashboardData ? dashboardData.pendingChats : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                </span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Chats Pendentes</span>
+              </div>
+              
+              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
+                <Sparkles className="w-6 h-6 text-emerald-400 mb-3" />
+                <span className="text-3xl font-black text-slate-100">
+                  {dashboardData ? dashboardData.newStrapiRules : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                </span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Novas Regras (24h)</span>
+              </div>
+
+              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
+                <CheckSquare className="w-6 h-6 text-blue-400 mb-3" />
+                <span className="text-3xl font-black text-slate-100">
+                  {dashboardData ? dashboardData.auditsThisWeek : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                </span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Auditorias (Semana)</span>
+              </div>
+
+              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
+                <Star className="w-6 h-6 text-amber-400 mb-3" />
+                <span className="text-3xl font-black text-slate-100">
+                  {dashboardData ? dashboardData.weeklyAvgRating : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                </span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Nota Média (Semana)</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => {
+                const today = new Date().toLocaleDateString('pt-BR');
+                localStorage.setItem('agape_welcome_seen', today);
+                setShowWelcome(false);
+              }} 
+              className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-10 rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 cursor-pointer"
+            >
+              <Activity className="w-4 h-4" /> Iniciar Auditorias
+            </button>
+          </div>
+        </div>
+      )}
 
       {chatToHide && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1381,7 +1457,6 @@ export default function AuditDashboard() {
               </div>
             </div>
 
-            {/* NOVA SESSÃO: Tópicos da Avaliação Geral */}
             <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-800/80">
               <div>
                 <label className="block text-sm font-bold text-slate-300 mb-1.5">Tópico</label>
@@ -1474,7 +1549,6 @@ export default function AuditDashboard() {
               </button>
             </div>
 
-            {/* ABAS DA MODAL */}
             <div className="flex bg-slate-900 border-b border-slate-800 p-2">
               <button 
                 onClick={() => setSettingsTab('topics')} 
@@ -1491,7 +1565,6 @@ export default function AuditDashboard() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-              {/* CONTEÚDO DA ABA: TÓPICOS */}
               {settingsTab === 'topics' && (
                 <>
                   {topics.map((t: Topic) => (
@@ -1546,7 +1619,6 @@ export default function AuditDashboard() {
                 </>
               )}
 
-              {/* CONTEÚDO DA ABA: MOTIVOS DE ERRO */}
               {settingsTab === 'reasons' && (
                 <>
                   <p className="text-xs text-slate-400 mb-2">Crie as opções de erro que os auditores poderão marcar durante a avaliação de uma resposta ou do chat inteiro.</p>
@@ -1571,7 +1643,6 @@ export default function AuditDashboard() {
               )}
             </div>
 
-            {/* RODAPÉ DA MODAL COM INPUT DINÂMICO */}
             <div className="p-5 border-t border-slate-800 flex items-center gap-3 bg-slate-900/50">
               {settingsTab === 'topics' ? (
                 <>

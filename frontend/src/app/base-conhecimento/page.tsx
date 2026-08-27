@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import axios from 'axios';
 import Link from 'next/link';
+import { diffLines } from 'diff';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
@@ -58,6 +59,25 @@ function highlightText(text: string, term: string) {
   );
 }
 
+// Helper para reconstruir o texto atual e comparar com o backup
+function buildCurrentText(moduleName: string, allItems: KnowledgeItem[]) {
+  const moduleItems = allItems.filter(item => item.module === moduleName);
+  let txtOutput = '';
+  let lastSection = '';
+  moduleItems.forEach(item => {
+    if (item.source?.includes('raw')) {
+      txtOutput += `${item.content}\n`;
+      return;
+    }
+    if (item.section && item.section !== lastSection) {
+      txtOutput += `\n## ${item.section}\n`;
+      lastSection = item.section;
+    }
+    txtOutput += `* ${item.title}: ${item.content}\n`;
+  });
+  return txtOutput.trim();
+}
+
 export default function BaseConhecimentoPage() {
   const isAuthorized = useAuth();
   const [uploading, setUploading] = useState(false);
@@ -71,7 +91,6 @@ export default function BaseConhecimentoPage() {
   
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Estados dos Dropdowns Customizados
   const [isKbDropdownOpen, setIsKbDropdownOpen] = useState(false);
   const [isEditKbDropdownOpen, setIsEditKbDropdownOpen] = useState(false);
 
@@ -214,25 +233,7 @@ export default function BaseConhecimentoPage() {
   };
 
   const handleOpenEditor = (moduleName: string) => {
-    const moduleItems = items.filter((item: KnowledgeItem) => item.module === moduleName);
-    
-    let txtOutput = '';
-    let lastSection = '';
-
-    moduleItems.forEach((item: KnowledgeItem) => {
-      if (item.source?.includes('raw')) {
-        txtOutput += `${item.content}\n`;
-        return;
-      }
-
-      if (item.section && item.section !== lastSection) {
-        txtOutput += `\n## ${item.section}\n`;
-        lastSection = item.section;
-      }
-      txtOutput += `* ${item.title}: ${item.content}\n`;
-    });
-
-    setEditText(txtOutput.trim());
+    setEditText(buildCurrentText(moduleName, items));
     setEditKbId(moduleKbId(moduleName));
     setEditingModule(moduleName);
   };
@@ -300,13 +301,10 @@ export default function BaseConhecimentoPage() {
 
   const confirmDeleteBackup = async () => {
     if (!backupToDelete) return;
-    
     try {
       await axios.delete(`${API_URL}/knowledge/backups/${backupToDelete}`);
       toast.success("Backup apagado com sucesso!");
-      
       setBackupsList(prev => prev.filter(b => b.id !== backupToDelete));
-      
       if (selectedBackup?.id === backupToDelete) {
         setSelectedBackup(null);
       }
@@ -320,6 +318,10 @@ export default function BaseConhecimentoPage() {
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
   }
+
+  // Lógica do DIFF
+  const currentLiveText = viewingBackups ? buildCurrentText(viewingBackups, items) : '';
+  const diffResult = selectedBackup ? diffLines(currentLiveText, selectedBackup.content) : [];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans overflow-x-hidden">
@@ -336,7 +338,6 @@ export default function BaseConhecimentoPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            {/* Título sem o truncate para evitar o corte das letras */}
             <div>
               <h1 className="text-xl md:text-2xl font-bold text-blue-400 flex items-center gap-2">
                 <BookOpen className="w-6 h-6 shrink-0" /> Central da Base de Conhecimento
@@ -377,7 +378,7 @@ export default function BaseConhecimentoPage() {
               </button>
             </div>
 
-            {/* DROPDOWN CUSTOMIZADO: Seleção de Base */}
+            {/* DROPDOWN CUSTOMIZADO */}
             <div className="flex flex-col gap-1 shrink-0 hidden sm:flex relative z-40">
               <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
                 <Database className="w-3 h-3" /> Novo arquivo vai para:
@@ -428,7 +429,7 @@ export default function BaseConhecimentoPage() {
               </div>
             </label>
 
-            {/* BOTÕES EMPILHADOS PARA ECONOMIZAR ESPAÇO */}
+            {/* BOTÕES EMPILHADOS */}
             <div className="flex flex-col gap-2 shrink-0 w-36">
               <label className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] cursor-pointer shadow-lg shadow-blue-600/20 transition-all w-full">
                 <Upload className="w-3.5 h-3.5" />
@@ -716,10 +717,10 @@ export default function BaseConhecimentoPage() {
         )}
       </div>
 
-      {/* MODAL DE HISTÓRICO DE BACKUPS */}
+      {/* MODAL DE HISTÓRICO DE BACKUPS COM DIFF VISUAL */}
       {viewingBackups && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl w-full max-w-6xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
               <div>
                 <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
@@ -768,34 +769,72 @@ export default function BaseConhecimentoPage() {
               <div className="flex-1 bg-slate-950 p-6 flex flex-col">
                 {selectedBackup ? (
                   <>
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">Preview do Arquivo</span>
+                    <div className="flex flex-col gap-3 mb-4">
                       
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => setBackupToDelete(selectedBackup.id)}
-                          className="flex items-center gap-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 px-3 py-2 rounded-lg text-xs font-bold transition-all border border-red-500/30 cursor-pointer"
-                          title="Apagar este backup para sempre"
-                        >
-                          <Trash2 className="w-4 h-4" /> Apagar
-                        </button>
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">Comparação de Versões</span>
                         
-                        <button
-                          onClick={handleRestoreBackup}
-                          className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-amber-600/20 cursor-pointer"
-                        >
-                          <RefreshCw className="w-4 h-4" /> Carregar no Editor
-                        </button>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            onClick={() => setBackupToDelete(selectedBackup.id)}
+                            className="flex items-center gap-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 px-3 py-2 rounded-lg text-xs font-bold transition-all border border-red-500/30 cursor-pointer"
+                            title="Apagar este backup para sempre"
+                          >
+                            <Trash2 className="w-4 h-4" /> Apagar
+                          </button>
+                          
+                          <button
+                            onClick={handleRestoreBackup}
+                            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-amber-600/20 cursor-pointer"
+                          >
+                            <RefreshCw className="w-4 h-4" /> Carregar no Editor
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
+                        <span className="flex items-center gap-1.5 text-red-400 bg-red-500/10 px-2.5 py-1 rounded border border-red-500/20">
+                          <span className="font-black text-sm">-</span> Texto atual (será apagado/sobrescrito)
+                        </span>
+                        <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">
+                          <span className="font-black text-sm">+</span> Texto do backup (voltará para o sistema)
+                        </span>
+                        <span className="flex items-center gap-1.5 text-slate-400 bg-slate-800/50 px-2.5 py-1 rounded border border-slate-700/50">
+                          Texto inalterado (será mantido)
+                        </span>
                       </div>
                     </div>
-                    <div className="flex-1 bg-slate-900/90 border border-slate-800 rounded-xl p-5 text-sm text-slate-300 font-mono overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-                      {selectedBackup.content}
+                    
+                    {/* Renderização do Diff no estilo GitHub */}
+                    <div className="flex-1 bg-slate-900/90 border border-slate-800 rounded-xl py-2 text-sm font-mono overflow-y-auto custom-scrollbar">
+                      {diffResult.map((part, index) => {
+                        const lines = part.value.replace(/\n$/, '').split('\n');
+                        return lines.map((line, i) => (
+                          <div 
+                            key={`${index}-${i}`} 
+                            className={`px-4 py-1 flex items-start gap-4 ${
+                              part.added ? 'bg-emerald-500/10 text-emerald-300' :
+                              part.removed ? 'bg-red-500/10 text-red-300' :
+                              'text-slate-400 hover:bg-slate-800/50'
+                            }`}
+                          >
+                            <span className={`select-none shrink-0 text-center font-black ${
+                              part.added ? 'text-emerald-500' :
+                              part.removed ? 'text-red-500' :
+                              'text-slate-600'
+                            }`}>
+                              {part.added ? '+' : part.removed ? '-' : ' '}
+                            </span>
+                            <span className="whitespace-pre-wrap break-words">{line || ' '}</span>
+                          </div>
+                        ));
+                      })}
                     </div>
                   </>
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
                     <FileText className="w-12 h-12 opacity-20" />
-                    <p className="text-sm font-medium">Selecione uma data na barra lateral para visualizar o conteúdo.</p>
+                    <p className="text-sm font-medium">Selecione uma data na barra lateral para visualizar o comparativo.</p>
                   </div>
                 )}
               </div>
@@ -901,7 +940,6 @@ export default function BaseConhecimentoPage() {
                 <Database className="w-3.5 h-3.5 text-blue-400" /> Este arquivo pertence à base:
               </label>
               
-              {/* DROPDOWN CUSTOMIZADO: Seleção de Base (Modal de Edição) */}
               <div className="relative z-40">
                 <button
                   onClick={() => setIsEditKbDropdownOpen(!isEditKbDropdownOpen)}
