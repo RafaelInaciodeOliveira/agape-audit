@@ -219,7 +219,6 @@ app.get('/api/chats/:id/messages', async (req, res) => {
   } catch { res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' }); }
 });
 
-// NOVA LÓGICA: Salva Tópico e Subtópico na Auditoria Geral
 app.post('/api/audits', async (req, res) => {
   try {
     const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = req.body;
@@ -370,8 +369,12 @@ app.get('/api/chats/:id/message-audits', async (req, res) => {
 app.post('/api/message-audits', async (req, res) => {
   try {
     const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = req.body;
-    let generatedQa = 0;
+    
     const db = await getDb();
+    
+    // 1. Busca a auditoria existente para não zerar a flag de QA se ela já foi treinada
+    const existingAudit = await db.collection('messageAudits').findOne({ chatId, messageId });
+    let generatedQa = existingAudit?.generatedQa || 0;
 
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
@@ -406,8 +409,8 @@ app.post('/api/message-audits', async (req, res) => {
           knowledgeBaseFail: isKbFail,
           auditorFeedback, generatedQa,
           targetModule: targetModule || null,
-          qaQuestion: generatedQa ? qaQuestion : null,
-          qaAnswer: generatedQa ? qaAnswer : null,
+          qaQuestion: generatedQa ? (existingAudit?.qaQuestion || qaQuestion) : null,
+          qaAnswer: generatedQa ? (existingAudit?.qaAnswer || qaAnswer) : null,
           auditorEmail, createdAt: new Date().toISOString(),
         },
         $setOnInsert: { id: newId() },
@@ -418,7 +421,6 @@ app.post('/api/message-audits', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// NOVA LÓGICA: Combina Avaliações Gerais e de Mensagem para o Relatório de Temas
 app.get('/api/reports/themes', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -437,12 +439,10 @@ app.get('/api/reports/themes', async (req, res) => {
     const topicById = new Map(topics.map((t: any) => [t.id, t.name]));
     const subtopicById = new Map(subtopics.map((s: any) => [s.id, s.name]));
 
-    // Junta as auditorias de mensagens com as auditorias gerais
     const allAudits = [...msgAudits, ...chatAudits];
 
     const groups = new Map<string, any>();
     for (const a of allAudits) {
-      // Ignora se for uma avaliação geral sem tópico
       if (!a.messageId && !a.topicId && !a.subtopicId) continue;
 
       const key = `${a.topicId || ''}::${a.subtopicId || ''}`;
@@ -543,15 +543,14 @@ app.get('/api/reports/value', async (req, res) => {
     }
 
     const db = await getDb();
-    const [chatAudits, messageAudits] = await Promise.all([
+    const [chatAudits, messageAudits, qaGenerated] = await Promise.all([
       db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
+      // CONTAGEM BLINDADA: Conta diretamente as inserções reais feitas na base de conhecimento!
+      db.collection('knowledge').countDocuments({ source: 'auditoria', ...dateFilter })
     ]);
 
     const chatsAudited = chatAudits.length;
-    const qaGenerated =
-      chatAudits.reduce((s: number, a: any) => s + (a.generatedQa || 0), 0) +
-      messageAudits.reduce((s: number, a: any) => s + (a.generatedQa || 0), 0);
 
     const ratingCounts = new Map<number, number>();
     for (const a of chatAudits) {
@@ -580,7 +579,6 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-// NOVA LÓGICA: Adiciona o Tópico e Subtópico da Avaliação Geral no CSV
 app.get('/api/reports/export', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -631,8 +629,8 @@ app.get('/api/reports/export', async (req, res) => {
         r.clientName || 'Desconhecido',
         r.carteiraTag || '-',
         r.rating ? `${r.rating} Estrelas` : 'Sem nota',
-        r.topicId ? topicById.get(r.topicId) : '-', // AGORA PUXA O TÓPICO
-        r.subtopicId ? subtopicById.get(r.subtopicId) : '-', // AGORA PUXA O SUBTÓPICO
+        r.topicId ? topicById.get(r.topicId) : '-',
+        r.subtopicId ? subtopicById.get(r.subtopicId) : '-',
         '-',
         formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
         r.auditorFeedback || '-',
@@ -668,7 +666,6 @@ app.get('/api/reports/export', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-// --- WEBHOOK DO STRAPI (NOVIDADES PROVER) ---
 app.post('/api/webhooks/strapi', async (req, res) => {
   try {
     const { event, entry } = req.body;
