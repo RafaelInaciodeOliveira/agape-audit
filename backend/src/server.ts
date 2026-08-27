@@ -722,15 +722,19 @@ app.get('/api/dashboard', async (req, res) => {
     const weeklyAvgRating = ratings.length > 0 ? (ratings.reduce((a: number,b: number)=>a+b,0)/ratings.length).toFixed(1) : '0.0';
 
     const { items: openChats } = await UmblerService.getChats({ chatState: 'Open' });
+    
+    // Puxa as auditorias
     const auditedList = await db.collection('audits').find({}, { projection: { chatId: 1 } }).toArray();
     const auditedSet = new Set(auditedList.map((a: any) => a.chatId));
-    
-    // FILTRO CORRIGIDO: Só conta chats em aberto que o Ágape participou e que não foram auditados
-    const pendingChats = (openChats || []).filter((chat: any) => {
-      // Se já foi auditado, ignora
-      if (auditedSet.has(chat.id)) return false;
 
-      // Verifica se o Ágape está no histórico do chat
+    // CORREÇÃO: Puxa a lista de chats ocultos para o dashboard ignorar eles
+    const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
+    const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
+    
+    // Conta apenas os que a IA atuou, que NÃO foram auditados e NÃO estão ocultos
+    const pendingChats = (openChats || []).filter((chat: any) => {
+      if (auditedSet.has(chat.id) || hiddenChatsSet.has(chat.id)) return false;
+
       const chatMembers = [
         ...(chat.organizationMembers || []),
         ...(chat.organizationMemberHistory || []).map((h: any) => ({ id: h.memberId })),
