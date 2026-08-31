@@ -164,7 +164,7 @@ function renderMediaNode(msg: any) {
             <img 
               src={mediaUrl} 
               alt="Mídia do Chat" 
-              className="max-w-xs max-h-64 rounded-xl border border-slate-700/50 object-cover cursor-pointer hover:opacity-80 transition-all shadow-sm" 
+              className="max-w-xs max-h-64 rounded-xl border border-slate-700/50 object-cover cursor-pointer hover:opacity-80 transition-all duration-300 shadow-sm" 
             />
           </a>
         ) : (
@@ -223,7 +223,6 @@ export default function AuditDashboard() {
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
   
-  // ESTADOS DO DASHBOARD DE BOAS VINDAS (NOVO)
   const [showWelcome, setShowWelcome] = useState(false);
   const { data: dashboardData } = useSWR(showWelcome ? `${API_URL}/dashboard` : null, fetcher);
 
@@ -232,7 +231,6 @@ export default function AuditDashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
-  // ESTADOS DA AVALIAÇÃO GERAL
   const [rating, setRating] = useState(0);
   const [generalTopicId, setGeneralTopicId] = useState(''); 
   const [generalSubtopicId, setGeneralSubtopicId] = useState(''); 
@@ -278,7 +276,6 @@ export default function AuditDashboard() {
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
   const { data: failReasons = [], mutate: mutateFailReasons } = useSWR<FailReason[]>(`${API_URL}/fail-reasons`, fetcher);
 
-  // EFEITO DO DASHBOARD: Verifica se é o primeiro acesso do dia
   useEffect(() => {
     setTimeout(() => {
       const today = new Date().toLocaleDateString('pt-BR');
@@ -286,7 +283,7 @@ export default function AuditDashboard() {
       if (lastSeen !== today) {
         setShowWelcome(true);
       }
-    }, 10); // Atraso imperceptível de 10ms para evitar o render em cascata
+    }, 10);
   }, []);
 
   useEffect(() => {
@@ -643,7 +640,7 @@ export default function AuditDashboard() {
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
 
-      {/* --- DASHBOARD DE BOAS-VINDAS (NOVO) --- */}
+      {/* --- DASHBOARD DE BOAS-VINDAS --- */}
       {showWelcome && (
         <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-4xl w-full shadow-2xl flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
@@ -696,7 +693,7 @@ export default function AuditDashboard() {
                 localStorage.setItem('agape_welcome_seen', today);
                 setShowWelcome(false);
               }} 
-              className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-10 rounded-xl transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 cursor-pointer"
+              className="bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-95 text-white font-bold py-3 px-10 rounded-xl transition-all duration-300 ease-out cursor-pointer flex items-center gap-2"
             >
               <Activity className="w-4 h-4" /> Iniciar Auditorias
             </button>
@@ -724,13 +721,13 @@ export default function AuditDashboard() {
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setChatToHide(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-bold transition-all duration-200 cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleConfirmHide}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-lg shadow-amber-600/20 transition-all cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-amber-600/20 transition-all duration-200 cursor-pointer"
               >
                 Sim, Ocultar
               </button>
@@ -752,7 +749,7 @@ export default function AuditDashboard() {
               <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
                 <Filter className="w-5 h-5 text-blue-400" /> Filtros Avançados
               </h3>
-              <button onClick={() => setShowFiltersModal(false)} className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer">
+              <button onClick={() => setShowFiltersModal(false)} className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -799,13 +796,13 @@ export default function AuditDashboard() {
             <div className="flex gap-3 pt-4 border-t border-slate-800/80">
               <button
                 onClick={() => setChatFilters([])}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800/50 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-slate-800/50 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-bold transition-all duration-200 cursor-pointer"
               >
                 Limpar
               </button>
               <button
                 onClick={() => setShowFiltersModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-all duration-200 cursor-pointer"
               >
                 Ver Resultados
               </button>
@@ -830,19 +827,19 @@ export default function AuditDashboard() {
           <div className="flex items-center gap-2">
             <Link
               href="/relatorios"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
             >
               <BarChart3 className="w-3.5 h-3.5" /> Relatórios
             </Link>
             <Link
               href="/base-conhecimento"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all shadow-sm"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
             >
               <BookOpen className="w-3.5 h-3.5" /> Base
             </Link>
             <button
               onClick={() => setShowSettingsModal(true)}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 transition-all cursor-pointer shadow-sm"
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-90 transition-all duration-200 cursor-pointer shadow-sm"
               title="Configurações (Temas e Motivos)"
             >
               <Settings className="w-4 h-4" />
@@ -858,10 +855,10 @@ export default function AuditDashboard() {
               <button
                 key={tab.id}
                 onClick={() => setStatusTab(tab.id)}
-                className={`flex-1 py-1.5 text-center rounded-lg transition-all cursor-pointer ${
+                className={`flex-1 py-1.5 text-center rounded-lg active:scale-95 transition-all duration-200 cursor-pointer ${
                   statusTab === tab.id 
                     ? 'bg-blue-600 text-white shadow-md' 
-                    : 'text-slate-400 hover:text-slate-200'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                 }`}
               >
                 {tab.label}
@@ -874,7 +871,7 @@ export default function AuditDashboard() {
             <div className="flex-1 relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="w-full flex items-center justify-between gap-2 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 rounded-xl px-3 py-2.5 transition-all focus:outline-none cursor-pointer"
+                className="w-full flex items-center justify-between gap-2 bg-blue-600/10 hover:bg-blue-600/20 active:scale-[0.98] border border-blue-500/30 rounded-xl px-3 py-2.5 transition-all duration-200 focus:outline-none cursor-pointer"
               >
                 <div className="flex items-center gap-2 overflow-hidden">
                   <Bot className="w-4 h-4 text-blue-400 shrink-0" />
@@ -926,7 +923,7 @@ export default function AuditDashboard() {
             <button 
               onClick={() => setShowFiltersModal(true)} 
               title="Filtros Avançados (Notas e Status)"
-              className={`p-2.5 rounded-xl border flex items-center justify-center transition-all cursor-pointer relative shrink-0 ${
+              className={`p-2.5 rounded-xl border flex items-center justify-center active:scale-90 transition-all duration-200 cursor-pointer relative shrink-0 ${
                 chatFilters.length > 0 
                   ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
                   : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-blue-300 hover:border-blue-500/40'
@@ -939,8 +936,8 @@ export default function AuditDashboard() {
             </button>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-500" />
+          <div className="relative group">
+            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-500 group-hover:text-blue-400 transition-colors" />
             <input
               type="text"
               value={searchTerm}
@@ -953,7 +950,7 @@ export default function AuditDashboard() {
 
         <div 
           onScroll={handleScroll} 
-          className="flex-1 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar relative"
+          className="flex-1 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar relative p-2"
         >
           {loadingChats && visibleChats.length === 0 ? (
             <div className="p-10 text-center text-slate-500 text-sm flex flex-col items-center justify-center gap-3">
@@ -978,13 +975,16 @@ export default function AuditDashboard() {
                 <div
                   key={chat.id}
                   onClick={() => handleSelectChat(chat)}
-                  className={`p-4 cursor-pointer hover:bg-slate-900/60 transition-all relative ${
+                  className={`group p-4 mb-1 rounded-xl cursor-pointer hover:bg-slate-900/80 hover:shadow-lg hover:shadow-black/20 hover:scale-[1.015] active:scale-[0.99] transition-all duration-300 ease-out relative overflow-hidden ${
                     selectedChat?.id === chat.id 
-                      ? 'bg-slate-900/90 border-l-[5px] border-blue-500' 
-                      : 'border-l-[5px] border-transparent'
+                      ? 'bg-slate-900/90 border border-blue-500/50 shadow-md ring-1 ring-blue-500/20' 
+                      : 'border border-transparent'
                   }`}
                 >
-                  <div className="flex justify-between items-center mb-2 gap-3">
+                  {/* Brilho invisível que aparece no hover (Toque Apple) */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+                  <div className="flex justify-between items-center mb-2 gap-3 relative z-10">
                     <span className="flex items-center gap-3 min-w-0">
                       {chat.contactPhoto ? (
                         <img src={chat.contactPhoto} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-700" />
@@ -1002,11 +1002,11 @@ export default function AuditDashboard() {
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-400 truncate mb-3 leading-relaxed font-medium">
+                  <p className="text-xs text-slate-400 truncate mb-3 leading-relaxed font-medium relative z-10">
                     {renderMessageContent(chat.lastMessage)}
                   </p>
 
-                  <div className="flex justify-between items-center text-[10px] font-mono font-medium">
+                  <div className="flex justify-between items-center text-[10px] font-mono font-medium relative z-10">
                     <span className="flex items-center gap-1.5 text-slate-500" title={`${dateStr} ${timeStr ? `às ${timeStr}` : ''}`}>
                       <Clock className="w-3.5 h-3.5 text-slate-500" />
                       {relativeTime}
@@ -1078,7 +1078,7 @@ export default function AuditDashboard() {
                   <button
                     onClick={handleUnhideChat}
                     title="Restaurar este chat para a lista principal"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer shadow-sm"
+                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-400 border border-emerald-500/30 transition-all duration-200 cursor-pointer shadow-sm"
                   >
                     <Eye className="w-4 h-4" /> Desocultar
                   </button>
@@ -1086,7 +1086,7 @@ export default function AuditDashboard() {
                   <button
                     onClick={() => setChatToHide(selectedChat)}
                     title="Ocultar chat de teste"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-slate-800/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-500/30 transition-all cursor-pointer shadow-sm"
+                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-slate-800/50 hover:bg-red-500/10 active:scale-90 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-500/30 transition-all duration-200 cursor-pointer shadow-sm"
                   >
                     <EyeOff className="w-4 h-4" />
                   </button>
@@ -1095,10 +1095,10 @@ export default function AuditDashboard() {
                 <button
                   onClick={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
                   title="Avaliar o atendimento como um todo (nota geral + observação)"
-                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer shrink-0 ${
+                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold active:scale-95 transition-all duration-200 cursor-pointer shrink-0 ${
                     selectedChat.audit
                       ? 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white shadow-sm'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/20'
+                      : 'bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-600/30 text-white'
                   }`}
                 >
                   {selectedChat.audit?.rating && selectedChat.audit.rating > 0 ? (
@@ -1181,9 +1181,9 @@ export default function AuditDashboard() {
                         <>
                           <div
                             onClick={() => isFromAgape && handleSelectMessage(m, i)}
-                            className={`max-w-[80%] rounded-[1.25rem] px-5 py-3 text-sm shadow-sm relative group bg-blue-600 text-white rounded-br-none shadow-blue-900/20 transition-all border border-blue-500 ${
-                              isFromAgape ? 'cursor-pointer hover:brightness-110' : ''
-                            } ${isSelected ? 'ring-4 ring-blue-300 scale-[1.01]' : ''}`}
+                            className={`max-w-[80%] rounded-[1.25rem] px-5 py-3 text-sm shadow-sm relative group bg-blue-600 text-white rounded-br-none shadow-blue-900/20 transition-all duration-300 border border-blue-500 ${
+                              isFromAgape ? 'cursor-pointer hover:brightness-110 hover:shadow-md' : ''
+                            } ${isSelected ? 'ring-4 ring-blue-300 scale-[1.02]' : ''}`}
                           >
                             <div className="flex justify-between items-center gap-5 mb-2 border-b border-white/20 pb-1.5">
                               <span className="text-xs font-bold flex items-center gap-1.5 text-blue-50 tracking-wide">
@@ -1201,7 +1201,7 @@ export default function AuditDashboard() {
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); handleSelectMessage(m, i); }}
-                                className={`mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${
+                                className={`mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all duration-200 cursor-pointer shadow-sm ${
                                   audited
                                     ? 'bg-emerald-500 text-white hover:bg-emerald-400 border border-emerald-400'
                                     : 'bg-white/15 text-white border border-white/30 hover:bg-white/25'
@@ -1256,7 +1256,7 @@ export default function AuditDashboard() {
             </h3>
             <button
               onClick={() => { setSelectedMessage(null); setRightPanelMode('none'); }}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -1402,7 +1402,7 @@ export default function AuditDashboard() {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer mt-2"
+              className="w-full bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98] active:translate-y-0 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-all duration-300 ease-out cursor-pointer mt-2"
             >
               <Send className="w-4 h-4" /> Salvar Auditoria da Resposta
             </button>
@@ -1419,7 +1419,7 @@ export default function AuditDashboard() {
 
             <button
               onClick={() => setRightPanelMode('none')}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1445,9 +1445,9 @@ export default function AuditDashboard() {
                       key={star}
                       type="button"
                       onClick={() => setRating(rating === star ? 0 : star)}
-                      className="p-1.5 focus:outline-none hover:scale-110 transition-all cursor-pointer"
+                      className={`p-1.5 focus:outline-none hover:scale-125 active:scale-75 transition-all duration-300 ease-out cursor-pointer ${isActive ? 'scale-110' : 'scale-100'}`}
                     >
-                      <Star className={`w-8 h-8 ${isActive ? `${colors.fill} ${colors.text}` : 'text-slate-700 hover:text-slate-500'}`} />
+                      <Star className={`w-8 h-8 transition-colors duration-300 ${isActive ? `${colors.fill} ${colors.text}` : 'text-slate-700 hover:text-slate-500'}`} />
                     </button>
                   );
                 })}
@@ -1522,7 +1522,7 @@ export default function AuditDashboard() {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all cursor-pointer mt-4"
+              className="w-full bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98] active:translate-y-0 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-all duration-300 ease-out cursor-pointer mt-4"
             >
               <Send className="w-4 h-4" /> Salvar Auditoria Geral
             </button>
@@ -1540,7 +1540,7 @@ export default function AuditDashboard() {
               </h3>
               <button
                 onClick={() => setShowSettingsModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-all cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1549,13 +1549,13 @@ export default function AuditDashboard() {
             <div className="flex bg-slate-900 border-b border-slate-800 p-2">
               <button 
                 onClick={() => setSettingsTab('topics')} 
-                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all cursor-pointer ${settingsTab === 'topics' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl active:scale-95 transition-all duration-200 cursor-pointer ${settingsTab === 'topics' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
               >
                 <Tag className="w-4 h-4 inline-block mr-1.5" /> Temas e Subtópicos
               </button>
               <button 
                 onClick={() => setSettingsTab('reasons')} 
-                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl transition-all cursor-pointer ${settingsTab === 'reasons' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl active:scale-95 transition-all duration-200 cursor-pointer ${settingsTab === 'reasons' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
               >
                 <ListX className="w-4 h-4 inline-block mr-1.5" /> Motivos de Erro
               </button>
@@ -1644,12 +1644,12 @@ export default function AuditDashboard() {
               {settingsTab === 'topics' ? (
                 <>
                   <input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()} placeholder="Adicionar novo tópico principal..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
-                  <button onClick={handleAddTopic} className="p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white cursor-pointer transition-all shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
+                  <button onClick={handleAddTopic} className="p-3 bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 active:scale-95 rounded-xl text-white cursor-pointer transition-all duration-200 shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
                 </>
               ) : (
                 <>
                   <input value={newReasonName} onChange={(e) => setNewReasonName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddReason()} placeholder="Novo motivo de erro..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
-                  <button onClick={handleAddReason} className="p-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white cursor-pointer transition-all shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
+                  <button onClick={handleAddReason} className="p-3 bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 active:scale-95 rounded-xl text-white cursor-pointer transition-all duration-200 shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
                 </>
               )}
             </div>
