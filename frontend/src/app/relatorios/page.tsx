@@ -7,7 +7,7 @@ import {
   ArrowLeft, BarChart3, Star, Calendar,
   GraduationCap, ListChecks, FileSpreadsheet, LucideIcon,
   TrendingUp, Activity, CheckCircle2, MessageSquareWarning,
-  PieChart, Target, AlertTriangle
+  PieChart, Target, AlertTriangle, Download // <-- Download importado aqui
 } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -257,7 +257,7 @@ export default function ReportsPage() {
             </div>
           </div>
           <a href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}`} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm">
-            <FileSpreadsheet className="w-4 h-4" /> Exportar (CSV)
+            <FileSpreadsheet className="w-4 h-4" /> Exportar Todos (CSV)
           </a>
         </div>
       </div>
@@ -397,7 +397,7 @@ export default function ReportsPage() {
                   <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
                     <PieChart className="w-5 h-5 text-purple-400" /> Ranking de Falhas
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">Os motivos de erro mais frequentes cometidos pela IA.</p>
+                  <p className="text-xs text-slate-500 mt-1">Clique em uma falha para baixar os chats afetados.</p>
                 </div>
                 <div className="flex-1 flex flex-col gap-3 overflow-y-auto custom-scrollbar pr-2 max-h-52">
                   {(!quality?.reasonsDistribution || quality.reasonsDistribution.length === 0) ? (
@@ -410,7 +410,12 @@ export default function ReportsPage() {
                       const pct = Math.max(2, (r.count / maxCount) * 100);
                       
                       return (
-                        <div key={r.id} className="relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-slate-600 transition-all">
+                        <a 
+                          key={r.id} 
+                          href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}&reasonId=${r.id}`}
+                          className="relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-purple-500/40 hover:bg-slate-900 transition-all cursor-pointer"
+                          title={`Baixar relatórios filtrados por: ${r.name}`}
+                        >
                           <div className="absolute left-0 top-0 bottom-0 bg-purple-500/15 transition-all duration-1000" style={{ width: `${pct}%` }}></div>
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
 
@@ -418,15 +423,24 @@ export default function ReportsPage() {
                             <div className="w-6 h-6 rounded bg-slate-900 border border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-400 shrink-0 shadow-inner group-hover:text-purple-400 group-hover:border-purple-500/50 transition-colors">
                               {i + 1}º
                             </div>
-                            <span className="text-xs font-bold text-slate-200 truncate" title={r.name}>{r.name}</span>
+                            <span className="text-xs font-bold text-slate-200 truncate group-hover:text-purple-300 transition-colors" title={r.name}>{r.name}</span>
                           </div>
-                          <div className="z-10 flex items-center gap-1.5 shrink-0 pl-3">
-                            <span className="text-sm font-black text-white">{r.count}</span>
-                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-                              {r.count === 1 ? 'falha' : 'falhas'}
-                            </span>
+                          
+                          <div className="z-10 flex items-center gap-2 shrink-0 pl-3">
+                            {/* Visual Padrão */}
+                            <div className="flex items-center gap-1.5 group-hover:hidden">
+                              <span className="text-sm font-black text-white">{r.count}</span>
+                              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                                {r.count === 1 ? 'falha' : 'falhas'}
+                              </span>
+                            </div>
+                            {/* Visual Hover (Download) */}
+                            <div className="hidden group-hover:flex items-center gap-1.5 text-purple-400 bg-purple-500/10 px-2 py-1 rounded border border-purple-500/20">
+                              <Download className="w-3.5 h-3.5" />
+                              <span className="text-[10px] font-bold uppercase">Baixar CSV</span>
+                            </div>
                           </div>
-                        </div>
+                        </a>
                       );
                     })
                   )}

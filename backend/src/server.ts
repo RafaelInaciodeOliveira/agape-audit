@@ -579,9 +579,10 @@ function toCsvCell(value: any): string {
   return `"${str.replace(/"/g, '""')}"`;
 }
 
+// NOVA LÓGICA: Uma linha por Chat, colunas dinâmicas para as mensagens auditadas
 app.get('/api/reports/export', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, reasonId } = req.query;
     let dateFilter: any = {};
     if (startDate && endDate) {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
@@ -589,22 +590,28 @@ app.get('/api/reports/export', async (req, res) => {
 
     const db = await getDb();
     
-    const [messageAudits, chatAudits, topics, subtopics, failReasons] = await Promise.all([
-      db.collection('messageAudits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
+    const [messageAuditsRaw, chatAuditsRaw, hiddenChatsList, topics, subtopics, failReasons] = await Promise.all([
+      db.collection('messageAudits').find(dateFilter).sort({ createdAt: 1 }).toArray(), // 1 para ordem cronológica
       db.collection('audits').find(dateFilter).sort({ createdAt: -1 }).toArray(),
+      db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray(),
       db.collection('topics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('subtopics').find({}, { projection: { _id: 0 } }).toArray(),
       db.collection('failReasons').find({}, { projection: { _id: 0 } }).toArray(),
     ]);
 
+    const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
+
+    // Remove os ocultos da lista bruta
+    const validChatAudits = chatAuditsRaw.filter((a: any) => !hiddenChatsSet.has(a.chatId));
+    const validMessageAudits = messageAuditsRaw.filter((a: any) => !hiddenChatsSet.has(a.chatId));
+
     const topicById = new Map(topics.map((t: any) => [t.id, t.name]));
     const subtopicById = new Map(subtopics.map((s: any) => [s.id, s.name]));
     const reasonById = new Map(failReasons.map((r: any) => [r.id, r.name]));
-    const chatAuditMap = new Map(chatAudits.map((c: any) => [c.chatId, c]));
 
     const formatReasons = (reasonsArr: string[], vRules: any, kbFail: any) => {
       if (reasonsArr && reasonsArr.length > 0) {
-        return reasonsArr.map(id => reasonById.get(id) || id).join(', ');
+        return reasonsArr.map((id: string) => reasonById.get(id) || id).join(', ');
       }
       let old = [];
       if (vRules) old.push('Violou diretrizes');
@@ -612,56 +619,126 @@ app.get('/api/reports/export', async (req, res) => {
       return old.length > 0 ? old.join(', ') : '-';
     };
 
+    // AGRUPADOR: Junta auditoria geral e de mensagens no mesmo Chat ID
+    const groupedChats = new Map<string, any>();
+
+    for (const c of validChatAudits) {
+      groupedChats.set(c.chatId, {
+        chatAudit: c,
+        msgAudits: [],
+        createdAt: new Date(c.createdAt),
+        clientName: c.clientName || 'Desconhecido',
+        carteiraTag: c.carteiraTag || '-'
+      });
+    }
+
+    for (const m of validMessageAudits) {
+      if (!groupedChats.has(m.chatId)) {
+        // Se a pessoa auditou só a mensagem, mas não deu nota geral ainda
+        groupedChats.set(m.chatId, {
+          chatAudit: null,
+          msgAudits: [m],
+          createdAt: new Date(m.createdAt),
+          clientName: 'Desconhecido',
+          carteiraTag: '-'
+        });
+      } else {
+        groupedChats.get(m.chatId).msgAudits.push(m);
+      }
+    }
+
+    const finalGroups = [];
+    let maxMessagesInSingleChat = 0;
+
+    // FILTRO DE RANKING DE FALHAS
+    for (const group of groupedChats.values()) {
+      let keep = true;
+      if (reasonId) {
+        const chatHasReason = group.chatAudit && (
+          (group.chatAudit.failReasons && group.chatAudit.failReasons.includes(reasonId)) ||
+          (reasonId === 'reason_violation' && group.chatAudit.violatedPromptRules) ||
+          (reasonId === 'reason_kb_fail' && group.chatAudit.knowledgeBaseFail)
+        );
+        const msgHasReason = group.msgAudits.some((m: any) => 
+          (m.failReasons && m.failReasons.includes(reasonId)) ||
+          (reasonId === 'reason_violation' && m.violatedPromptRules) ||
+          (reasonId === 'reason_kb_fail' && m.knowledgeBaseFail)
+        );
+        keep = chatHasReason || msgHasReason;
+      }
+      
+      if (keep) {
+        if (group.msgAudits.length > maxMessagesInSingleChat) {
+          maxMessagesInSingleChat = group.msgAudits.length;
+        }
+        finalGroups.push(group);
+      }
+    }
+
+    // Ordena do mais recente para o mais antigo
+    finalGroups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    // Montando o Cabeçalho Base
     const header = [
-      'Data', 'Hora', 'Tipo de Auditoria', 'Cliente', 'Carteira', 'Nota Geral',
-      'Tópico', 'Subtópico', 'Pergunta do Cliente', 'Motivos de Falha',
-      'Observação / Feedback', 'Gerou Treino (Q&A)'
+      'Data da Auditoria', 'Hora', 'Cliente', 'Carteira', 'Nota Geral',
+      'Tópico Geral', 'Subtópico Geral', 'Motivos de Falha Geral', 'Feedback Geral'
     ];
+
+    // Adiciona as colunas dinâmicas com base no chat que teve mais mensagens corrigidas
+    for (let i = 1; i <= maxMessagesInSingleChat; i++) {
+      header.push(
+        `Pergunta do Cliente ${i}`,
+        `Tópico (Msg ${i})`,
+        `Subtópico (Msg ${i})`,
+        `Motivos de Falha (Msg ${i})`,
+        `Feedback (Msg ${i})`,
+        `Gerou Q&A? (Msg ${i})`
+      );
+    }
 
     const lines = [header.map(toCsvCell).join(';')];
 
-    for (const r of chatAudits as any[]) {
-      const d = new Date(r.createdAt);
-      lines.push([
-        d.toLocaleDateString('pt-BR'),
-        d.toLocaleTimeString('pt-BR'),
-        'Avaliação de Atendimento',
-        r.clientName || 'Desconhecido',
-        r.carteiraTag || '-',
-        r.rating ? `${r.rating} Estrelas` : 'Sem nota',
-        r.topicId ? topicById.get(r.topicId) : '-',
-        r.subtopicId ? subtopicById.get(r.subtopicId) : '-',
-        '-',
-        formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
-        r.auditorFeedback || '-',
-        '-'
-      ].map(toCsvCell).join(';'));
-    }
+    // Preenchendo os dados (Uma linha por chat)
+    for (const group of finalGroups) {
+      const c = group.chatAudit || {};
+      const row = [
+        group.createdAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        group.createdAt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }),
+        group.clientName,
+        group.carteiraTag,
+        c.rating ? `${c.rating} Estrelas` : 'Sem nota',
+        c.topicId ? topicById.get(c.topicId) || c.topicId : '-',
+        c.subtopicId ? subtopicById.get(c.subtopicId) || c.subtopicId : '-',
+        formatReasons(c.failReasons, c.violatedPromptRules, c.knowledgeBaseFail),
+        c.auditorFeedback || '-'
+      ];
 
-    for (const r of messageAudits as any[]) {
-      const d = new Date(r.createdAt);
-      const chatInfo = chatAuditMap.get(r.chatId) || {};
-      
-      lines.push([
-        d.toLocaleDateString('pt-BR'),
-        d.toLocaleTimeString('pt-BR'),
-        'Correção de Resposta da IA',
-        chatInfo.clientName || 'Desconhecido',
-        chatInfo.carteiraTag || '-',
-        '-',
-        r.topicId ? topicById.get(r.topicId) : '-',
-        r.subtopicId ? subtopicById.get(r.subtopicId) : '-',
-        r.clientQuestion || '-',
-        formatReasons(r.failReasons, r.violatedPromptRules, r.knowledgeBaseFail),
-        r.auditorFeedback || '-',
-        r.generatedQa ? 'Sim' : 'Não'
-      ].map(toCsvCell).join(';'));
+      // Preenchendo as colunas dinâmicas de cada mensagem
+      for (let i = 0; i < maxMessagesInSingleChat; i++) {
+        const m = group.msgAudits[i];
+        if (m) {
+          row.push(
+            m.clientQuestion || '-',
+            m.topicId ? topicById.get(m.topicId) || m.topicId : '-',
+            m.subtopicId ? subtopicById.get(m.subtopicId) || m.subtopicId : '-',
+            formatReasons(m.failReasons, m.violatedPromptRules, m.knowledgeBaseFail),
+            m.auditorFeedback || '-',
+            m.generatedQa ? 'Sim' : 'Não'
+          );
+        } else {
+          // Se esse chat teve menos mensagens corrigidas que o máximo, deixa os campos com "-"
+          row.push('-', '-', '-', '-', '-', '-');
+        }
+      }
+
+      lines.push(row.map(toCsvCell).join(';'));
     }
 
     const csv = '\uFEFF' + lines.join('\r\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="auditorias-agape-${new Date().toISOString().slice(0, 10)}.csv"`);
+    const fileNameSuffix = reasonId ? `-filtro-falha` : '';
+    res.setHeader('Content-Disposition', `attachment; filename="auditorias-agape${fileNameSuffix}-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(csv);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
