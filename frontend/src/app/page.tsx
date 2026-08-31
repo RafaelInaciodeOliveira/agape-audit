@@ -9,7 +9,7 @@ import { Toaster, toast } from 'sonner';
 import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
-  Activity, BrainCircuit, Tag, Plus, Trash2, Pencil, 
+  Activity, Tag, Plus, Trash2, Pencil, 
   ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
@@ -819,7 +819,7 @@ export default function AuditDashboard() {
         <div className="p-5 border-b border-slate-800/80 space-y-4 bg-slate-900/40">
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-blue-400 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-blue-500 fill-blue-500/20" />
+              <img src="/favicon.ico" alt="Zhavia" className="w-5 h-5 object-contain" />
               Auditoria Ágape
             </h1>
             <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-mono font-medium">
@@ -1132,7 +1132,7 @@ export default function AuditDashboard() {
                 </div>
               ) : messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
-                  <BrainCircuit className="w-12 h-12 text-slate-700 animate-pulse" />
+                  <img src="/favicon.ico" alt="Zhavia" className="w-12 h-12 object-contain opacity-50 animate-pulse" />
                   <h3 className="text-slate-400 font-bold text-base">Nenhuma mensagem salva</h3>
                   <p className="text-slate-600 text-sm max-w-sm">
                     Inicie ou atualize a conversa no Umbler para sincronizar.
@@ -1226,15 +1226,12 @@ export default function AuditDashboard() {
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-10 space-y-6">
             <div className="relative flex items-center justify-center">
-              <div className="absolute w-48 h-48 rounded-full border border-blue-500/20 animate-ping opacity-75"></div>
-              <div className="absolute w-40 h-40 rounded-full border border-blue-400/30 animate-spin" style={{ animationDuration: '8s' }}></div>
-              
-              <div className="w-32 h-32 rounded-3xl bg-gradient-to-tr from-blue-600/30 via-indigo-500/20 to-cyan-400/30 border border-blue-500/40 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-blue-500/20">
-                <BrainCircuit className="w-14 h-14 text-blue-400 animate-pulse" />
-              </div>
-
-              <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
-                <Activity className="w-3 h-3 text-blue-400 animate-bounce" /> Sistema Ativo
+              <div className="relative w-32 h-32 rounded-3xl bg-gradient-to-tr from-blue-600/30 via-indigo-500/20 to-cyan-400/30 border border-blue-500/40 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-blue-500/20 p-6">
+                <img src="/favicon.ico" alt="Zhavia" className="w-16 h-16 object-contain animate-pulse drop-shadow-[0_0_15px_rgba(96,165,250,0.8)]" />
+                
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                  <Activity className="w-3 h-3 text-blue-400 animate-bounce" /> Sistema Ativo
+                </div>
               </div>
             </div>
 

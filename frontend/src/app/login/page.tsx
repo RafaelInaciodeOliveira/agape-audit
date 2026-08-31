@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, User, ArrowRight, Activity, Sparkles } from 'lucide-react';
+import { Lock, User, ArrowRight, Activity } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 
 export default function LoginPage() {
@@ -125,13 +125,16 @@ export default function LoginPage() {
           
           {/* LOGO E TÍTULO */}
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 bg-slate-950/50 border border-slate-800/80 rounded-2xl flex items-center justify-center shadow-inner mb-4 relative group">
+            <div className="px-6 py-4 bg-slate-950/50 border border-slate-800/80 rounded-2xl flex items-center justify-center shadow-inner mb-4 relative group">
               <div className="absolute inset-0 bg-white/5 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-              {/* Puxando o favicon diretamente */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/favicon.ico" alt="Ágape" className="w-8 h-8 object-contain drop-shadow-lg" />
-              <Sparkles className="w-4 h-4 text-purple-400 absolute -top-1.5 -right-1.5 animate-pulse opacity-70" />
+              <img 
+                src="/logo_zhavia.png" 
+                alt="Zhavia Auditoria" 
+                className="h-8 md:h-10 object-contain drop-shadow-[0_0_15px_rgba(59,130,246,0.3)] relative z-10" 
+              />
             </div>
+            
             <h1 className="text-2xl font-black text-slate-100 tracking-tight">Auditoria Ágape</h1>
             <p className="text-xs text-slate-400 mt-1.5 font-medium">Acesso restrito para Auditores</p>
           </div>
