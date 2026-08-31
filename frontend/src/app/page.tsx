@@ -953,9 +953,16 @@ export default function AuditDashboard() {
           className="flex-1 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar relative p-2"
         >
           {loadingChats && visibleChats.length === 0 ? (
-            <div className="p-10 text-center text-slate-500 text-sm flex flex-col items-center justify-center gap-3">
-              <Clock className="w-6 h-6 animate-spin text-blue-500" /> 
-              Sincronizando chats do Umbler...
+            <div className="p-4 space-y-5">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="flex gap-4 items-center p-2">
+                  <div className="w-10 h-10 rounded-full bg-slate-800/60 animate-pulse shrink-0" />
+                  <div className="flex-1 space-y-3">
+                    <div className="h-3 bg-slate-800/60 rounded w-2/3 animate-pulse" />
+                    <div className="h-2 bg-slate-800/60 rounded w-1/2 animate-pulse" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : visibleChats.length === 0 ? (
             <div className="p-10 text-center text-slate-500 space-y-1">
@@ -1126,9 +1133,21 @@ export default function AuditDashboard() {
               className="flex-1 p-6 lg:p-8 overflow-y-auto space-y-5 bg-slate-900/30 custom-scrollbar"
             >
               {loadingMessages ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-500 text-sm gap-3">
-                  <Clock className="w-8 h-8 animate-spin text-blue-500" />
-                  Carregando mensagens da conversa...
+                <div className="h-full flex flex-col p-2 space-y-8 overflow-hidden">
+                  <div className="flex justify-start">
+                    <div className="w-2/3 h-16 rounded-[1.25rem] rounded-bl-none bg-slate-800/40 animate-pulse" />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <div className="w-1/2 h-20 rounded-[1.25rem] rounded-br-none bg-blue-900/10 border border-blue-500/10 animate-pulse" />
+                    <div className="w-8 h-8 rounded-full bg-slate-800/50 animate-pulse shrink-0" />
+                  </div>
+                  <div className="flex justify-start">
+                    <div className="w-1/2 h-12 rounded-[1.25rem] rounded-bl-none bg-slate-800/40 animate-pulse" />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <div className="w-2/5 h-16 rounded-[1.25rem] rounded-br-none bg-blue-900/10 border border-blue-500/10 animate-pulse" />
+                    <div className="w-8 h-8 rounded-full bg-slate-800/50 animate-pulse shrink-0" />
+                  </div>
                 </div>
               ) : messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
@@ -1229,7 +1248,7 @@ export default function AuditDashboard() {
               <div className="relative w-32 h-32 rounded-3xl bg-gradient-to-tr from-blue-600/30 via-indigo-500/20 to-cyan-400/30 border border-blue-500/40 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-blue-500/20 p-6">
                 <img src="/favicon.ico" alt="Zhavia" className="w-16 h-16 object-contain animate-pulse drop-shadow-[0_0_15px_rgba(96,165,250,0.8)]" />
                 
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                <div className="absolute -top-5.5 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
                   <Activity className="w-3 h-3 text-blue-400 animate-bounce" /> Sistema Ativo
                 </div>
               </div>
@@ -1249,7 +1268,7 @@ export default function AuditDashboard() {
       </div>
 
       {selectedChat && rightPanelMode === 'message' && selectedMessage && (
-        <div className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl">
+        <div key={`msg-${selectedMessage.id}`} className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl animate-gaveta">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/80">
             <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
               <ClipboardCheck className="w-5 h-5 text-blue-400" /> Auditoria da Resposta
@@ -1411,7 +1430,7 @@ export default function AuditDashboard() {
       )}
 
       {selectedChat && rightPanelMode === 'chat' && (
-        <div className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl">
+        <div key={`chat-${selectedChat.id}`} className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl animate-gaveta">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/80">
             <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
               <BookOpen className="w-5 h-5 text-blue-400" /> Auditoria do Atendimento

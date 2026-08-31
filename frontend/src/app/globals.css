@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
 
 :root {
   --background: #ffffff;
@@ -50,4 +51,24 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: #1e293b #090d16;
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  
+  /* Criando a animação nativa no Tailwind v4 */
+  --animate-gaveta: gaveta 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  
+  @keyframes gaveta {
+    0% {
+      opacity: 0;
+      transform: translateX(40px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
 }
