@@ -79,6 +79,11 @@ initDb().catch((err) => console.error('Erro ao inicializar o MongoDB:', err.mess
 
 const CARTEIRAS = ['ANTARES', 'ARCTURUS', 'ALPHA', 'SIGMA', 'SIRIUS'];
 const AGAPE_MEMBER_ID = 'afDzOd4PFUB3xLbX';
+
+// Detecta variantes/instâncias de teste do bot da Ágape (ex: "Teste ativo Ágape"),
+// que na Umbler não compartilham o mesmo organizationMember.id da instância oficial.
+const isAgapeBotName = (botName?: string) =>
+  Boolean(botName) && botName!.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes('agape');
 const KNOWN_ATTENDANTS = [
   { id: AGAPE_MEMBER_ID, name: 'Ágape (IA)' },
   { id: 'Zfn4fJl90YDKSkka', name: 'Grazi' },
@@ -106,16 +111,13 @@ app.get('/api/chats', async (req, res) => {
 
     if (targetStatus === 'ocultos') {
       const [{ items: openChats }, { items: closedChats }] = await Promise.all([
-        UmblerService.getChats({ chatState: 'Open', memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined }),
-        UmblerService.getChats({ chatState: 'Closed', memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined })
+        UmblerService.getChats({ chatState: 'Open' }),
+        UmblerService.getChats({ chatState: 'Closed' })
       ]);
       chatsToProcess = [...(openChats || []), ...(closedChats || [])].filter((chat: any) => hiddenChatsSet.has(chat.id));
     } else {
       const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
-      const { items: umblerChats } = await UmblerService.getChats({
-        chatState,
-        memberId: attendantId && attendantId !== 'TODOS' ? String(attendantId) : undefined,
-      });
+      const { items: umblerChats } = await UmblerService.getChats({ chatState });
       chatsToProcess = (umblerChats || []).filter((chat: any) => !hiddenChatsSet.has(chat.id));
     }
 
@@ -130,6 +132,19 @@ app.get('/api/chats', async (req, res) => {
       ) || 'ANTARES';
 
       const lastMsgFromChat = chat.lastMessage;
+
+      // DEBUG TEMPORÁRIO: remover depois de confirmar o formato do organizationMemberHistory.
+      if (chat.organizationMember?.id === 'ZuSZiD4N-bRbWZZf') {
+        console.log('\n=== DEBUG chat Brenda ===', chat.id, chat.contact?.name);
+        console.dir({
+          organizationMember: chat.organizationMember,
+          lastOrganizationMember: chat.lastOrganizationMember,
+          organizationMembers: chat.organizationMembers,
+          organizationMemberHistory: chat.organizationMemberHistory,
+          lastMessage: chat.lastMessage,
+        }, { depth: null });
+      }
+
       const chatMembers = [
         ...(chat.organizationMembers || []),
         ...(chat.organizationMemberHistory || []).map((h: any) => ({ id: h.memberId })),
@@ -145,6 +160,12 @@ app.get('/api/chats', async (req, res) => {
 
       const chatStatus = (chat.closedAtUTC || chat.open === false) ? 'closed' : chat.waiting ? 'waiting' : 'open';
 
+      const isAgapeLastMessage =
+        lastMsgFromChat?.sentByOrganizationMember?.id === AGAPE_MEMBER_ID ||
+        (lastMsgFromChat?.source === 'Bot' && isAgapeBotName(lastMsgFromChat?.botInstance?.botName));
+
+      const effectiveOwnerId = isAgapeLastMessage ? AGAPE_MEMBER_ID : chat.organizationMember?.id;
+
       return {
         id: chat.id,
         contactName: chat.contact?.name || 'Cliente sem nome',
@@ -156,6 +177,7 @@ app.get('/api/chats', async (req, res) => {
         updatedAt: lastMsgDate,
         hasAgapeInteracted,
         chatStatus,
+        effectiveOwnerId,
         audit: audit || null,
         hasMessageAudits,
         cachedMessages: []
@@ -175,6 +197,9 @@ app.get('/api/chats', async (req, res) => {
       return dateB - dateA;
     });
 
+    if (attendantId && attendantId !== 'TODOS') {
+      chats = chats.filter((c: any) => c.effectiveOwnerId === String(attendantId));
+    }
     if (carteira && carteira !== 'TODAS') {
       chats = chats.filter((c: any) => c.carteiraTag.toUpperCase().includes(String(carteira).toUpperCase()));
     }
@@ -745,16 +770,31 @@ app.get('/api/reports/export', async (req, res) => {
 
 app.post('/api/webhooks/strapi', async (req, res) => {
   try {
+    console.log('=== NOVO EVENTO STRAPI ===', JSON.stringify(req.body, null, 2));
+
     const { event, entry } = req.body;
+    const dataPayload = entry || req.body?.data;
 
     if (event === 'entry.create' || event === 'entry.publish' || event === 'entry.update') {
-      const title = entry?.title || entry?.titulo || entry?.name || 'Nova Atualização do Sistema';
-      const content = entry?.content || entry?.conteudo || entry?.description || entry?.texto || '';
+      const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
 
-      if (!content) return res.status(400).json({ error: 'Artigo sem conteúdo, ignorado.' });
+      const title = dataPayload?.title;
+      const description = dataPayload?.description_prover || dataPayload?.description_catholic;
+
+      if (!title || !description) {
+        console.warn('Ignorado: Artigo sem título ou descrição');
+        return res.json({ success: true, message: 'Ignorado: sem título ou descrição' });
+      }
+
+      const steps = Array.isArray(dataPayload?.step)
+        ? dataPayload.step.map((s: any) => s.text).join('\n')
+        : '';
 
       const qaQuestion = `Quais são as novidades sobre: ${title}?`;
-      const qaAnswer = `Sobre a novidade "${title}":\n\n${content}`;
+      const qaAnswer = stripHtml(steps ? `${description}\n\n${steps}` : description);
+
+      const releaseDate = dataPayload?.release || dataPayload?.publishedAt;
+      const dateStr = releaseDate ? new Date(releaseDate).toISOString() : new Date().toISOString();
 
       const db = await getDb();
       await db.collection('knowledge').insertOne({
@@ -764,8 +804,8 @@ app.post('/api/webhooks/strapi', async (req, res) => {
         title: qaQuestion,
         content: qaAnswer,
         source: 'strapi_webhook',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        createdAt: dateStr,
+        updatedAt: dateStr
       });
 
       console.log(`🚀 Strapi Webhook: Novidade '${title}' salva no TXT Novidades Prover!`);
