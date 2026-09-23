@@ -10,7 +10,7 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
+  ArrowLeft, BarChart3, Coins, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth'; 
 
@@ -836,6 +836,12 @@ export default function AuditDashboard() {
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
             >
               <BookOpen className="w-3.5 h-3.5" /> Base
+            </Link>
+            <Link
+              href="/custos-ia"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
+            >
+              <Coins className="w-3.5 h-3.5" /> Custos
             </Link>
             <button
               onClick={() => setShowSettingsModal(true)}

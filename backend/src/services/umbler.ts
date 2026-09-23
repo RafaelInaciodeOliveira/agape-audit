@@ -131,6 +131,22 @@ export const UmblerService = {
   }
 },
 
+  // Busca as últimas mensagens de um chat sem logs, com metadados de cobrança (message.billable).
+  // Usado pela sincronização de custos de IA, que percorre muitos chats de uma vez.
+  getChatMessagesWithBilling: async (chatId: string, take = 250): Promise<any[]> => {
+    const response = await umblerApi.get(`/v1/chats/${chatId}/relative-messages/`, {
+      params: {
+        organizationId,
+        FromEventUTC: new Date().toISOString(),
+        Take: take,
+        Direction: 'TakeBefore',
+        IncludeMetadata: true,
+      },
+    });
+    const msgs = response.data?.messages ?? response.data?.items ?? response.data?.data ?? response.data;
+    return Array.isArray(msgs) ? msgs : [];
+  },
+
   // Cria um novo Q&A
   createKnowledgeBaseQA: async (question: string, answer: string) => {
     const kbId = process.env.UMBLER_KB_ID;

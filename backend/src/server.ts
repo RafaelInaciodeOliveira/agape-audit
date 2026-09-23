@@ -5,21 +5,38 @@ import mongoose from 'mongoose';
 import { MongoClient, Db } from 'mongodb';
 import { UmblerService } from './services/umbler.js';
 import knowledgeRoutes from './routes/knowledgeRoutes.js';
+import finopsRoutes from './routes/finopsRoutes.js';
+import { syncAiUsageFromUmbler } from './services/aiUsageSync.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Limite maior que o padrão (100kb): webhooks do Strapi com rich text e passos passam disso
+app.use(express.json({ limit: '5mb' }));
 
 const mongoUri = process.env.MONGODB_URI || '';
 if (mongoUri) {
   mongoose.connect(mongoUri)
-    .then(() => console.log('🍃 Mongoose conectado com sucesso ao MongoDB Atlas!'))
+    .then(() => {
+      console.log('🍃 Mongoose conectado com sucesso ao MongoDB Atlas!');
+      scheduleAiUsageSync();
+    })
     .catch((err) => console.error('❌ Erro ao conectar Mongoose:', err));
 }
 
+// Importa periodicamente da Umbler o consumo (créditos) das respostas do Ágape para o painel de Custos de IA
+function scheduleAiUsageSync() {
+  if (!process.env.UMBLER_TOKEN) return;
+  const minutes = Number(process.env.FINOPS_SYNC_INTERVAL_MIN || 15);
+  if (!Number.isFinite(minutes) || minutes <= 0) return;
+  const run = () => syncAiUsageFromUmbler().catch((err) => console.error('[FinOps] Falha no sync automático:', err.message));
+  setTimeout(run, 10_000);
+  setInterval(run, minutes * 60_000);
+}
+
 app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/finops', finopsRoutes);
 
 let dbInstance: Db | null = null;
 async function getDb(): Promise<Db> {
@@ -768,54 +785,139 @@ app.get('/api/reports/export', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
+// --- WEBHOOK DO STRAPI (Novidades Prover -> Base de Conhecimento) ---
+// Converte campos de texto do Strapi em texto puro. Aceita os dois formatos de rich text:
+// string (HTML/Markdown) e o editor "Blocks" do Strapi 5 (array JSON de nós com children/text).
+function strapiToText(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'string') {
+    return value
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|li|h[1-6])>/gi, '\n')
+      .replace(/<[^>]*>?/gm, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map(strapiToText).filter(Boolean).join('\n').trim();
+  }
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (Array.isArray(value.children)) {
+      const inline = value.children.every((c: any) => typeof c?.text === 'string');
+      return inline ? value.children.map((c: any) => c.text).join('') : strapiToText(value.children);
+    }
+  }
+  return '';
+}
+
 app.post('/api/webhooks/strapi', async (req, res) => {
+  console.log('=== NOVO EVENTO STRAPI ===');
+  console.log('Headers:', JSON.stringify({ 'content-type': req.headers['content-type'], 'user-agent': req.headers['user-agent'] }));
+  console.log(JSON.stringify(req.body, null, 2));
+
+  // Proteção opcional: no painel do Strapi, adicione o header "Authorization: Bearer <STRAPI_WEBHOOK_SECRET>"
+  const secret = process.env.STRAPI_WEBHOOK_SECRET;
+  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+    console.warn('[Strapi] Webhook recusado: header Authorization ausente ou inválido.');
+    return res.status(401).json({ error: 'Não autorizado.' });
+  }
+
   try {
-    console.log('=== NOVO EVENTO STRAPI ===', JSON.stringify(req.body, null, 2));
+    // Strapi v4 e v5 enviam { event, model, uid, entry }; "data" cobre integrações customizadas
+    const { event, model, uid } = req.body || {};
+    const entry = req.body?.entry || req.body?.data;
+    const entryId = entry?.documentId || entry?.id;
 
-    const { event, entry } = req.body;
-    const dataPayload = entry || req.body?.data;
-
-    if (event === 'entry.create' || event === 'entry.publish' || event === 'entry.update') {
-      const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
-
-      const title = dataPayload?.title;
-      const description = dataPayload?.description_prover || dataPayload?.description_catholic;
-
-      if (!title || !description) {
-        console.warn('Ignorado: Artigo sem título ou descrição');
-        return res.json({ success: true, message: 'Ignorado: sem título ou descrição' });
-      }
-
-      const steps = Array.isArray(dataPayload?.step)
-        ? dataPayload.step.map((s: any) => s.text).join('\n')
-        : '';
-
-      const qaQuestion = `Quais são as novidades sobre: ${title}?`;
-      const qaAnswer = stripHtml(steps ? `${description}\n\n${steps}` : description);
-
-      const releaseDate = dataPayload?.release || dataPayload?.publishedAt;
-      const dateStr = releaseDate ? new Date(releaseDate).toISOString() : new Date().toISOString();
-
-      const db = await getDb();
-      await db.collection('knowledge').insertOne({
-        id: newId(),
-        module: 'Novidades Prover',
-        section: 'Base Geral de Conhecimento',
-        title: qaQuestion,
-        content: qaAnswer,
-        source: 'strapi_webhook',
-        createdAt: dateStr,
-        updatedAt: dateStr
-      });
-
-      console.log(`🚀 Strapi Webhook: Novidade '${title}' salva no TXT Novidades Prover!`);
-      return res.json({ success: true, message: 'Novidade recebida e salva na Base de Conhecimento!' });
+    if (!event || !entry) {
+      console.warn('[Strapi] Payload sem "event" ou "entry"; nada a fazer.');
+      return res.json({ success: true, message: 'Ignorado: payload sem event/entry.' });
     }
 
-    res.json({ success: true, message: 'Evento ignorado (não é criação/publicação).' });
+    // Chave estável do artigo no Strapi: evita duplicar o card a cada create/update/publish
+    const strapiKey = entryId != null ? `${model || uid || 'entry'}:${entryId}` : null;
+    const db = await getDb();
+
+    if (event === 'entry.unpublish' || event === 'entry.delete') {
+      if (!strapiKey) return res.json({ success: true, message: 'Ignorado: entrada sem id.' });
+      try {
+        const { deletedCount } = await db.collection('knowledge').deleteMany({ source: 'strapi_webhook', strapiKey });
+        console.log(`[Strapi] ${event}: ${deletedCount} item(ns) removido(s) de Novidades Prover (${strapiKey}).`);
+      } catch (dbError: any) {
+        console.error('[Strapi] Erro de banco ao remover novidade:', dbError.name, dbError.code, dbError.message);
+        console.error(dbError.stack);
+        throw dbError;
+      }
+      return res.json({ success: true, message: 'Novidade removida da Base de Conhecimento.' });
+    }
+
+    if (event !== 'entry.create' && event !== 'entry.update' && event !== 'entry.publish') {
+      return res.json({ success: true, message: `Evento ignorado: ${event}.` });
+    }
+
+    // Com Draft & Publish ativo, create/update de rascunho chegam com publishedAt = null
+    if ('publishedAt' in entry && !entry.publishedAt) {
+      console.log(`[Strapi] ${event} ignorado: "${entry.title}" ainda é rascunho (publishedAt = null).`);
+      return res.json({ success: true, message: 'Ignorado: rascunho não publicado.' });
+    }
+
+    const title = strapiToText(entry.title).replace(/[\s:;,.-]+$/, '');
+    const description = strapiToText(entry.description_prover) || strapiToText(entry.description_catholic);
+
+    if (!title || !description) {
+      console.warn('[Strapi] Ignorado: artigo sem título ou descrição. Campos recebidos em entry:', Object.keys(entry).join(', '));
+      return res.json({ success: true, message: 'Ignorado: sem título ou descrição' });
+    }
+
+    const steps = Array.isArray(entry.step)
+      ? entry.step.map((s: any) => strapiToText(s?.text ?? s)).filter(Boolean).join('\n')
+      : '';
+
+    const qaQuestion = `Quais são as novidades sobre: ${title}?`;
+    const qaAnswer = steps ? `${description}\n\n${steps}` : description;
+
+    const releaseDate = entry.release || entry.publishedAt;
+    const nowIso = new Date().toISOString();
+
+    try {
+      const filter = strapiKey ? { source: 'strapi_webhook', strapiKey } : { source: 'strapi_webhook', title: qaQuestion };
+      const result = await db.collection('knowledge').updateOne(
+        filter,
+        {
+          $set: {
+            title: qaQuestion,
+            content: qaAnswer,
+            releaseDate: releaseDate ? new Date(releaseDate).toISOString() : null,
+            updatedAt: nowIso,
+          },
+          $setOnInsert: {
+            id: newId(),
+            module: 'Novidades Prover',
+            section: 'Base Geral de Conhecimento',
+            source: 'strapi_webhook',
+            strapiKey,
+            createdAt: nowIso,
+          },
+        },
+        { upsert: true }
+      );
+      const action = result.upsertedCount ? 'criada' : 'atualizada';
+      console.log(`🚀 [Strapi] ${event}: novidade '${title}' ${action} em Novidades Prover (${strapiKey}).`);
+      return res.json({ success: true, message: `Novidade ${action} na Base de Conhecimento!` });
+    } catch (dbError: any) {
+      console.error('[Strapi] Erro de banco ao salvar novidade:', dbError.name, dbError.code, dbError.message);
+      console.error(dbError.stack);
+      throw dbError;
+    }
   } catch (error: any) {
-    console.error('Erro no Webhook do Strapi:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[Strapi] Erro no webhook:', error.message);
+    console.error(error.stack);
+    return res.status(500).json({ error: error.message });
   }
 });
 
