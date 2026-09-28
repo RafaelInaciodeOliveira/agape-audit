@@ -32,6 +32,13 @@ export function clearToken() {
   LEGACY_KEYS.forEach(k => sessionStorage.removeItem(k));
 }
 
+/** Usuário logado (claim `sub` do JWT), ou null sem sessão. */
+export function getCurrentUser(token = getToken()): string | null {
+  if (!token) return null;
+  const sub = decodeClaims(token)?.sub;
+  return typeof sub === 'string' && sub ? sub : null;
+}
+
 /** Expiração do token em ms (epoch), ou null se o token não existir ou for ilegível. */
 export function getTokenExpiry(token = getToken()): number | null {
   if (!token) return null;

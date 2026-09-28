@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
 import { API_URL, fetcher } from './lib/api';
-import { logout } from './lib/auth';
+import { getCurrentUser, logout } from './lib/auth';
 
 
 
@@ -497,7 +497,7 @@ export default function AuditDashboard() {
       subtopicId: generalSubtopicId || null,
       failReasons: generalFailReasons,
       auditorFeedback: feedback,
-      auditorEmail: 'auditor@prover.com.br',
+      auditorEmail: getCurrentUser(),
     });
 
     toast.promise(promise, {
@@ -561,7 +561,7 @@ export default function AuditDashboard() {
       targetModule: msgTargetModule || 'Módulo Geral',
       qaQuestion: msgQaQuestion,
       qaAnswer: msgQaAnswer,
-      auditorEmail: 'auditor@prover.com.br',
+      auditorEmail: getCurrentUser(),
     });
 
     toast.promise(promise, {

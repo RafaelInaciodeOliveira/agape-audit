@@ -13,6 +13,9 @@ import {
   messageAuditBodySchema, nameBodySchema, reportQuerySchema,
 } from './validation/schemas.js';
 import { syncAiUsageFromUmbler } from './services/aiUsageSync.js';
+import {
+  getAgapeMemberId, getAttendants, getCarteiras, hasAgapeInteracted, resolveCarteira, seedBusinessConfig,
+} from './services/businessConfig.js';
 
 dotenv.config();
 
@@ -102,23 +105,10 @@ async function initDb() {
   }
 }
 
-const CARTEIRAS = ['ANTARES', 'ARCTURUS', 'ALPHA', 'SIGMA', 'SIRIUS'];
-const AGAPE_MEMBER_ID = 'afDzOd4PFUB3xLbX';
-
 // Detecta variantes/instâncias de teste do bot da Ágape (ex: "Teste ativo Ágape"),
 // que na Umbler não compartilham o mesmo organizationMember.id da instância oficial.
 const isAgapeBotName = (botName?: string) =>
   Boolean(botName) && botName!.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes('agape');
-const KNOWN_ATTENDANTS = [
-  { id: AGAPE_MEMBER_ID, name: 'Ágape (IA)' },
-  { id: 'Zfn4fJl90YDKSkka', name: 'Grazi' },
-  { id: 'ZuSZZB90jnWXPdJM', name: 'Grasieli Kolaço' },
-  { id: 'ZuSZiD4N-bRbWZZf', name: 'Brenda Prover' },
-  { id: 'ZuSZiB90jnWXPu0V', name: 'Amanda' },
-  { id: 'ZfnQ9OEJHZvJ95w6', name: 'Suporte' },
-  { id: 'acpzV_4hy6-atHJl', name: 'Ana Carolina' },
-];
-
 app.param('id', paramValidator(idSchema));
 app.param('topicId', paramValidator(idSchema));
 
@@ -137,6 +127,8 @@ app.get('/api/chats', async (req, res) => {
     const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
 
     const targetStatus = status ?? 'finalizados';
+    const agapeId = getAgapeMemberId();
+    const carteiras = await getCarteiras();
     let chatsToProcess: any[] = [];
 
     if (targetStatus === 'ocultos') {
@@ -157,20 +149,11 @@ app.get('/api/chats', async (req, res) => {
       const combinedTags = [...(chat.tags || []), ...(chat.contact?.tags || [])];
       const tagNames = Array.from(new Set(combinedTags.map((t: any) => t.name).filter(Boolean))) as string[];
 
-      const carteiraTag = tagNames.find((name: string) =>
-        CARTEIRAS.some(c => name.toUpperCase().includes(c))
-      ) || 'ANTARES';
+      const carteiraTag = resolveCarteira(tagNames, carteiras);
 
       const lastMsgFromChat = chat.lastMessage;
 
-      const chatMembers = [
-        ...(chat.organizationMembers || []),
-        ...(chat.organizationMemberHistory || []).map((h: any) => ({ id: h.memberId })),
-      ];
-      const hasAgapeInteracted =
-        chatMembers.some((m: any) => m?.id === AGAPE_MEMBER_ID) ||
-        chat.organizationMember?.id === AGAPE_MEMBER_ID ||
-        chat.lastOrganizationMember?.id === AGAPE_MEMBER_ID;
+      const agapeInteracted = hasAgapeInteracted(chat, agapeId);
 
       const lastMsgDate =
         lastMsgFromChat?.createdAtUTC || lastMsgFromChat?.createdAt ||
@@ -179,10 +162,10 @@ app.get('/api/chats', async (req, res) => {
       const chatStatus = (chat.closedAtUTC || chat.open === false) ? 'closed' : chat.waiting ? 'waiting' : 'open';
 
       const isAgapeLastMessage =
-        lastMsgFromChat?.sentByOrganizationMember?.id === AGAPE_MEMBER_ID ||
+        lastMsgFromChat?.sentByOrganizationMember?.id === agapeId ||
         (lastMsgFromChat?.source === 'Bot' && isAgapeBotName(lastMsgFromChat?.botInstance?.botName));
 
-      const effectiveOwnerId = isAgapeLastMessage ? AGAPE_MEMBER_ID : chat.organizationMember?.id;
+      const effectiveOwnerId = isAgapeLastMessage ? agapeId : chat.organizationMember?.id;
 
       return {
         id: chat.id,
@@ -193,7 +176,7 @@ app.get('/api/chats', async (req, res) => {
         allTags: tagNames,
         lastMessage: lastMsgFromChat || null,
         updatedAt: lastMsgDate,
-        hasAgapeInteracted,
+        hasAgapeInteracted: agapeInteracted,
         chatStatus,
         effectiveOwnerId,
         audit: audit || null,
@@ -266,7 +249,10 @@ app.post('/api/audits', async (req, res) => {
   try {
     const input = parseInput(chatAuditBodySchema, req.body, res);
     if (!input) return;
-    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = input;
+    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, topicId, subtopicId } = input;
+    // O auditor é quem está autenticado (assinado no JWT); o valor enviado pelo cliente é só fallback.
+    const auditorEmail = req.user?.sub || input.auditorEmail || null;
+    const nowIso = new Date().toISOString();
     const db = getDb();
     
     let isViolated = violatedPromptRules ? 1 : 0;
@@ -287,9 +273,9 @@ app.post('/api/audits', async (req, res) => {
           failReasons: failReasons || [],
           violatedPromptRules: isViolated,
           knowledgeBaseFail: isKbFail,
-          auditorFeedback, auditorEmail, createdAt: new Date().toISOString(),
+          auditorFeedback, auditorEmail, updatedAt: nowIso,
         },
-        $setOnInsert: { id: newId() },
+        $setOnInsert: { id: newId(), createdAt: nowIso },
       },
       { upsert: true }
     );
@@ -297,12 +283,18 @@ app.post('/api/audits', async (req, res) => {
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
-app.get('/api/config', (_req, res) => {
-  res.json({
-    agapeMemberId: AGAPE_MEMBER_ID,
-    attendants: KNOWN_ATTENDANTS,
-    defaultKnowledgeBaseId: process.env.UMBLER_KB_ID,
-  });
+app.get('/api/config', async (_req, res) => {
+  try {
+    res.json({
+      agapeMemberId: getAgapeMemberId(),
+      attendants: await getAttendants(),
+      carteiras: await getCarteiras(),
+      defaultKnowledgeBaseId: process.env.UMBLER_KB_ID,
+    });
+  } catch (error) {
+    logError('GET /api/config', error);
+    res.status(500).json({ error: 'Erro ao carregar as configurações.' });
+  }
 });
 
 app.get('/api/fail-reasons', async (_req, res) => {
@@ -427,7 +419,9 @@ app.post('/api/message-audits', async (req, res) => {
   try {
     const input = parseInput(messageAuditBodySchema, req.body, res);
     if (!input) return;
-    const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = input;
+    const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer } = input;
+    const auditorEmail = req.user?.sub || input.auditorEmail || null;
+    const nowIso = new Date().toISOString();
     
     const db = getDb();
     
@@ -470,9 +464,9 @@ app.post('/api/message-audits', async (req, res) => {
           targetModule: targetModule || null,
           qaQuestion: generatedQa ? (existingAudit?.qaQuestion || qaQuestion) : null,
           qaAnswer: generatedQa ? (existingAudit?.qaAnswer || qaAnswer) : null,
-          auditorEmail, createdAt: new Date().toISOString(),
+          auditorEmail, updatedAt: nowIso,
         },
-        $setOnInsert: { id: newId() },
+        $setOnInsert: { id: newId(), createdAt: nowIso },
       },
       { upsert: true }
     );
@@ -969,20 +963,10 @@ app.get('/api/dashboard', async (req, res) => {
     const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
     
     // Conta apenas os que a IA atuou, que NÃO foram auditados e NÃO estão ocultos
-    const pendingChats = (openChats || []).filter((chat: any) => {
-      if (auditedSet.has(chat.id) || hiddenChatsSet.has(chat.id)) return false;
-
-      const chatMembers = [
-        ...(chat.organizationMembers || []),
-        ...(chat.organizationMemberHistory || []).map((h: any) => ({ id: h.memberId })),
-      ];
-      const hasAgapeInteracted =
-        chatMembers.some((m: any) => m?.id === AGAPE_MEMBER_ID) ||
-        chat.organizationMember?.id === AGAPE_MEMBER_ID ||
-        chat.lastOrganizationMember?.id === AGAPE_MEMBER_ID;
-
-      return hasAgapeInteracted;
-    }).length;
+    const agapeId = getAgapeMemberId();
+    const pendingChats = (openChats || []).filter((chat: any) =>
+      !auditedSet.has(chat.id) && !hiddenChatsSet.has(chat.id) && hasAgapeInteracted(chat, agapeId)
+    ).length;
 
     res.json({ newStrapiRules, weeklyAvgRating, pendingChats, auditsThisWeek: ratings.length });
   } catch (error: any) {
@@ -1005,11 +989,13 @@ const PORT = process.env.PORT || 3001;
 // Ordem de inicialização: banco conectado → índices/seed → sync agendado → HTTP.
 // Assim nenhuma rota roda antes de a conexão estar pronta.
 async function start() {
+  getAgapeMemberId(); // falha cedo se UMBLER_AGENT_ID não estiver no .env
   await connectDatabase();
   console.log('✅ [MongoDB] Conectado com sucesso (conexão única via Mongoose).');
 
   await initDb();
   await ensureKnowledgeIndexes();
+  await seedBusinessConfig();
   scheduleAiUsageSync();
 
   app.listen(PORT, () => {

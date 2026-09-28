@@ -1,4 +1,5 @@
 import { getDb } from '../config/db.js';
+import { getAgapeMemberId } from './businessConfig.js';
 import { getEncoding, Tiktoken } from 'js-tiktoken';
 import AiUsage from '../models/AiUsage.js';
 import { UmblerService } from './umbler.js';
@@ -17,7 +18,7 @@ const SYNC_STATE_KEY = 'aiUsage:umbler';
 const OVERLAP_MS = 60 * 60 * 1000;
 const CONCURRENCY = 4;
 // Id de membro do Ágape na Umbler (o mesmo AGAPE_MEMBER_ID usado em server.ts)
-const agentMemberId = () => process.env.UMBLER_AGENT_ID || 'afDzOd4PFUB3xLbX';
+const agentMemberId = () => getAgapeMemberId();
 
 let encoder: Tiktoken | null = null;
 function countTokens(text: string) {

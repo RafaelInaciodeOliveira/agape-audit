@@ -131,6 +131,82 @@ function parseTxtToItems(textContent: string, base: ParseBase): KnowledgeDoc[] {
   return itemsToSave;
 }
 
+// Campos de origem que o texto do módulo não carrega e que não podem se perder quando o
+// módulo é reescrito (editor ou reupload): sem eles, Q&As da auditoria deixam de contar
+// em "Treinamentos Realizados" e o webhook do Strapi duplica as novidades.
+const ORIGIN_FIELDS = ['source', 'strapiKey', 'releaseDate'] as const;
+const PRESERVED_SOURCES = new Set(['auditoria', 'strapi_webhook']);
+
+const normalizeKey = (v: unknown) => String(v ?? '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Casa cada item novo com um item antigo equivalente e herda os campos de origem.
+ *
+ * O parser corta a linha `* título: conteúdo` no primeiro ":", então um título que
+ * contém ":" (ex.: "Quais são as novidades sobre: Nova tela?") volta do texto partido.
+ * Por isso o índice usa só o trecho do título antes do primeiro ":" e, havendo match,
+ * confere se a linha reconstruída começa com o título antigo completo — nesse caso
+ * restaura título e conteúdo corretos. Busca primeiro na mesma seção e depois em
+ * qualquer seção (item movido); títulos repetidos são consumidos em ordem.
+ */
+export function inheritOriginMetadata(newItems: KnowledgeDoc[], oldItems: KnowledgeDoc[]): KnowledgeDoc[] {
+  const candidates = oldItems.filter(it => PRESERVED_SOURCES.has(it.source));
+  if (candidates.length === 0) return newItems;
+
+  const head = (title: unknown) => normalizeKey(String(title ?? '').split(':')[0]);
+  const used = new Set<KnowledgeDoc>();
+  const bySection = new Map<string, KnowledgeDoc[]>();
+  const byHead = new Map<string, KnowledgeDoc[]>();
+  for (const it of candidates) {
+    const k1 = `${normalizeKey(it.section)}\u0000${head(it.title)}`;
+    const k2 = head(it.title);
+    (bySection.get(k1) ?? bySection.set(k1, []).get(k1)!).push(it);
+    (byHead.get(k2) ?? byHead.set(k2, []).get(k2)!).push(it);
+  }
+
+  // Devolve { title, content } do item novo reinterpretado com o título antigo, ou null.
+  const align = (item: KnowledgeDoc, old: KnowledgeDoc): { title: string; content: string } | null => {
+    const oldTitle = String(old.title ?? '');
+    if (!oldTitle.includes(':')) {
+      return normalizeKey(item.title) === normalizeKey(oldTitle) ? { title: item.title, content: item.content } : null;
+    }
+    const line = `${item.title}: ${item.content}`;
+    const prefix = `${oldTitle}:`;
+    if (!normalizeKey(line).startsWith(normalizeKey(prefix))) return null;
+    // Avança na linha original até consumir o título antigo inteiro (ignorando espaços).
+    const target = prefix.replace(/\s+/g, '');
+    let consumed = 0;
+    let i = 0;
+    while (i < line.length && consumed < target.length) {
+      if (!/\s/.test(line[i])) consumed++;
+      i++;
+    }
+    return { title: oldTitle, content: line.slice(i).trim() };
+  };
+
+  const take = (item: KnowledgeDoc, list?: KnowledgeDoc[]) => {
+    for (const old of list ?? []) {
+      if (used.has(old)) continue;
+      const aligned = align(item, old);
+      if (aligned) return { old, aligned };
+    }
+    return null;
+  };
+
+  return newItems.map(item => {
+    const found =
+      take(item, bySection.get(`${normalizeKey(item.section)}\u0000${head(item.title)}`)) ??
+      take(item, byHead.get(head(item.title)));
+    if (!found) return item;
+    used.add(found.old);
+    const inherited = { ...item, title: found.aligned.title, content: found.aligned.content };
+    for (const field of ORIGIN_FIELDS) {
+      if (found.old[field] !== undefined) inherited[field] = found.old[field];
+    }
+    return inherited;
+  });
+}
+
 // Guarda o texto anterior do módulo antes de sobrescrevê-lo. Não cria backup quando nada
 // mudou ou quando o último backup já tem exatamente esse conteúdo.
 async function saveBackupIfChanged(db: Db, moduleName: string, oldText: string, newText: string, reason: 'edit' | 'upload') {
@@ -309,7 +385,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     }
 
     const nowIso = new Date().toISOString();
-    const itemsToSave = parseTxtToItems(textContent, {
+    const parsedItems = parseTxtToItems(textContent, {
       module: currentModule,
       source: 'upload_txt',
       knowledgeBaseId,
@@ -320,6 +396,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     const db = getDb();
     const previousItems = await loadModuleItems(db, currentModule);
+    const itemsToSave = inheritOriginMetadata(parsedItems, previousItems);
     const previousKbId = previousItems[0]?.knowledgeBaseId;
     
     if (previousKbId && previousKbId !== knowledgeBaseId) {
@@ -360,14 +437,14 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     const knowledgeBaseId = input.knowledgeBaseId || previousKbId || undefined;
     const knowledgeBaseName = input.knowledgeBaseName || existingItems[0]?.knowledgeBaseName || undefined;
 
-    const itemsToSave = parseTxtToItems(textContent, {
+    const itemsToSave = inheritOriginMetadata(parseTxtToItems(textContent, {
       module: moduleName,
       source: 'manual',
       knowledgeBaseId,
       knowledgeBaseName,
       createdAt,
       updatedAt,
-    });
+    }), existingItems);
 
     await saveBackupIfChanged(db, moduleName, buildTxtFromItems(existingItems), buildTxtFromItems(itemsToSave), 'edit');
 
