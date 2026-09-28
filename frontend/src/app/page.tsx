@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
 import useSWR from 'swr';
@@ -24,7 +24,7 @@ interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
 interface FailReason { id: string; name: string; }
 interface Attendant { id: string; name: string; }
 interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; topicId?: string; subtopicId?: string; }
-interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; cachedMessages?: Message[]; hasMessageAudits?: boolean; }
+interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; hasMessageAudits?: boolean; }
 interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
 interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
 // ----------------
@@ -44,6 +44,15 @@ function getRatingColor(rating: number | null) {
   if (rating === 4) return { text: 'text-lime-400', fill: 'fill-lime-400', bg: 'bg-lime-500/10', border: 'border-lime-500/30' };
   if (rating === 5) return { text: 'text-emerald-400', fill: 'fill-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
   return { text: 'text-slate-400', fill: 'fill-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
+}
+
+// Polling do SWR só com a aba visível e online; ao voltar para a aba, revalida na hora.
+const BACKGROUND_SAFE_POLLING = { refreshWhenHidden: false, refreshWhenOffline: false, revalidateOnFocus: true } as const;
+
+function normalizeMessages(data: unknown): Message[] {
+  if (Array.isArray(data)) return data as Message[];
+  const d = data as { items?: Message[]; messages?: Message[]; data?: Message[] } | undefined;
+  return d?.items ?? d?.messages ?? d?.data ?? [];
 }
 
 function getTagBadge(tagName: string) {
@@ -228,8 +237,6 @@ export default function AuditDashboard() {
 
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
 
   const [rating, setRating] = useState(0);
   const [generalTopicId, setGeneralTopicId] = useState(''); 
@@ -308,35 +315,24 @@ export default function AuditDashboard() {
     : null;
     
   const { data: chatsData, isLoading: loadingChats, mutate: mutateChats } = useSWR(
-    chatQueryUrl, 
-    fetcher, 
-    { refreshInterval: 15000 }
+    chatQueryUrl,
+    fetcher,
+    { refreshInterval: 15000, ...BACKGROUND_SAFE_POLLING }
   );
 
   const activeChatMessagesUrl = selectedChat ? `${API_URL}/chats/${selectedChat.id}/messages` : null;
-  useSWR(
+  const { data: messagesData, isLoading: loadingMessages } = useSWR(
     activeChatMessagesUrl,
     fetcher,
-    { 
+    {
       refreshInterval: 10000,
-      onSuccess: (data) => {
-        let msgsToRender: Message[] = [];
-        if (Array.isArray(data)) msgsToRender = data;
-        else if (data?.items) msgsToRender = data.items;
-        else if (data?.messages) msgsToRender = data.messages;
-        else if (data?.data) msgsToRender = data.data;
-
-        setMessages((prev) => {
-          if (prev.length > 0 && prev.length === msgsToRender.length) {
-            const prevLast = prev[prev.length - 1];
-            const newLast = msgsToRender[msgsToRender.length - 1];
-            if (prevLast?.id === newLast?.id) return prev;
-          }
-          return msgsToRender;
-        });
-      }
+      ...BACKGROUND_SAFE_POLLING,
+      onError: () => toast.error('Erro ao carregar mensagens do chat.', { id: 'chat-messages-error' }),
     }
   );
+  // O SWR mantém a mesma referência de `data` quando nada mudou, então o efeito de
+  // auto-scroll não dispara a cada polling sem mensagens novas.
+  const messages = useMemo(() => normalizeMessages(messagesData), [messagesData]);
 
   const toggleFilter = (val: number | 'pendente' | 'parcial') => {
     setChatFilters(prev => 
@@ -411,7 +407,6 @@ export default function AuditDashboard() {
     setSelectedChat(chat);
     setSelectedMessage(null);
     setRightPanelMode('none');
-    setLoadingMessages(true);
 
     if (chat.audit) {
       setRating(chat.audit.rating || 0);
@@ -432,28 +427,6 @@ export default function AuditDashboard() {
       setMessageAudits(auditsRes.data || {});
     } catch {
       setMessageAudits({});
-    }
-
-    if (chat.cachedMessages && Array.isArray(chat.cachedMessages) && chat.cachedMessages.length > 0) {
-      setMessages(chat.cachedMessages);
-      setLoadingMessages(false);
-      return;
-    }
-
-    try {
-      const res = await axios.get(`${API_URL}/chats/${chat.id}/messages`);
-      let msgsToRender: Message[] = [];
-      if (Array.isArray(res.data)) msgsToRender = res.data;
-      else if (res.data && Array.isArray(res.data.items)) msgsToRender = res.data.items;
-      else if (res.data && Array.isArray(res.data.messages)) msgsToRender = res.data.messages;
-      else if (res.data && Array.isArray(res.data.data)) msgsToRender = res.data.data;
-      setMessages(msgsToRender);
-    } catch (err) {
-      console.error(err);
-      toast.error('Erro ao carregar mensagens do chat.');
-      setMessages([]);
-    } finally {
-      setLoadingMessages(false);
     }
   };
 

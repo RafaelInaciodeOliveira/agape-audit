@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDatabase, getDb } from './config/db.js';
 import { UmblerService } from './services/umbler.js';
+import { getCachedChats } from './services/chatCache.js';
 import knowledgeRoutes, { ensureKnowledgeIndexes } from './routes/knowledgeRoutes.js';
 import finopsRoutes from './routes/finopsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -119,32 +120,34 @@ app.get('/api/chats', async (req, res) => {
     const { carteira, search, attendantId, status } = query;
     const db = getDb();
     
-    const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
-    const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
-
-    const auditedList = await db.collection('audits').find({}, { projection: { _id: 0 } }).toArray();
-    const messageAuditsList = await db.collection('messageAudits').find({}, { projection: { chatId: 1 } }).toArray();
-    const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
-
     const targetStatus = status ?? 'finalizados';
     const agapeId = getAgapeMemberId();
-    const carteiras = await getCarteiras();
-    let chatsToProcess: any[] = [];
 
-    if (targetStatus === 'ocultos') {
-      const [{ items: openChats }, { items: closedChats }] = await Promise.all([
-        UmblerService.getChats({ chatState: 'Open' }),
-        UmblerService.getChats({ chatState: 'Closed' })
-      ]);
-      chatsToProcess = [...(openChats || []), ...(closedChats || [])].filter((chat: any) => hiddenChatsSet.has(chat.id));
-    } else {
-      const chatState = targetStatus === 'finalizados' ? 'Closed' : 'Open';
-      const { items: umblerChats } = await UmblerService.getChats({ chatState });
-      chatsToProcess = (umblerChats || []).filter((chat: any) => !hiddenChatsSet.has(chat.id));
-    }
+    // Lista da Umbler vem do cache curto (compartilhado entre requisições e auditores).
+    const states: Array<'Open' | 'Closed'> =
+      targetStatus === 'ocultos' ? ['Open', 'Closed'] : [targetStatus === 'finalizados' ? 'Closed' : 'Open'];
+    const [carteiras, hiddenChatsList, ...results] = await Promise.all([
+      getCarteiras(),
+      db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray(),
+      ...states.map((state) => getCachedChats(state)),
+    ]);
+    const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
+    const truncated = results.some((r) => r.truncated);
+    const chatsToProcess = results
+      .flatMap((r) => r.items)
+      .filter((chat: any) => (targetStatus === 'ocultos') === hiddenChatsSet.has(chat.id));
+
+    // Só as auditorias dos chats retornados, indexadas por chatId (antes: coleções inteiras + find em loop).
+    const chatIds = chatsToProcess.map((c: any) => c.id);
+    const [auditDocs, chatIdsWithMessageAudits] = await Promise.all([
+      db.collection('audits').find({ chatId: { $in: chatIds } }, { projection: { _id: 0 } }).toArray(),
+      db.collection('messageAudits').distinct('chatId', { chatId: { $in: chatIds } }),
+    ]);
+    const auditByChat = new Map(auditDocs.map((a: any) => [a.chatId, a]));
+    const chatsWithMessageAudits = new Set(chatIdsWithMessageAudits);
 
     const analyzedChats = chatsToProcess.map((chat: any) => {
-      const audit = auditedList.find((a: any) => a.chatId === chat.id);
+      const audit = auditByChat.get(chat.id);
       const hasMessageAudits = chatsWithMessageAudits.has(chat.id);
       const combinedTags = [...(chat.tags || []), ...(chat.contact?.tags || [])];
       const tagNames = Array.from(new Set(combinedTags.map((t: any) => t.name).filter(Boolean))) as string[];
@@ -181,7 +184,6 @@ app.get('/api/chats', async (req, res) => {
         effectiveOwnerId,
         audit: audit || null,
         hasMessageAudits,
-        cachedMessages: []
       };
     });
 
@@ -213,7 +215,7 @@ app.get('/api/chats', async (req, res) => {
       );
     }
 
-    res.json({ total: chats.length, items: chats });
+    res.json({ total: chats.length, items: chats, truncated });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
@@ -952,11 +954,12 @@ app.get('/api/dashboard', async (req, res) => {
     const ratings = recentAudits.map((a: any) => a.rating).filter((r: any) => typeof r === 'number');
     const weeklyAvgRating = ratings.length > 0 ? (ratings.reduce((a: number,b: number)=>a+b,0)/ratings.length).toFixed(1) : '0.0';
 
-    const { items: openChats } = await UmblerService.getChats({ chatState: 'Open' });
-    
-    // Puxa as auditorias
-    const auditedList = await db.collection('audits').find({}, { projection: { chatId: 1 } }).toArray();
-    const auditedSet = new Set(auditedList.map((a: any) => a.chatId));
+    const { items: openChats } = await getCachedChats('Open');
+    const openIds = openChats.map((c: any) => c.id);
+
+    // Puxa só as auditorias dos chats abertos
+    const auditedIds = await db.collection('audits').distinct('chatId', { chatId: { $in: openIds } });
+    const auditedSet = new Set(auditedIds);
 
     // CORREÇÃO: Puxa a lista de chats ocultos para o dashboard ignorar eles
     const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();

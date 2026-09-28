@@ -1,5 +1,6 @@
 import { getDb } from '../config/db.js';
 import { getAgapeMemberId } from './businessConfig.js';
+import { logError } from '../utils/logger.js';
 import { getEncoding, Tiktoken } from 'js-tiktoken';
 import AiUsage from '../models/AiUsage.js';
 import { UmblerService } from './umbler.js';
@@ -97,6 +98,9 @@ function buildUsageRecords(chat: any, messages: any[], agentMemberId: string) {
 
 let running: Promise<SyncResult> | null = null;
 
+// Trava do sync completo (?full=true); o incremental para sozinho no último sync.
+const FULL_SYNC_MAX_CHATS = 50_000;
+
 export interface SyncResult { chatsScanned: number; recordsFound: number; inserted: number; failedChats: number; lastSyncAt: string | null; }
 
 // Evita execuções simultâneas (intervalo automático + botão do painel)
@@ -110,9 +114,12 @@ async function runSync(agentMemberId: string, { full = false }: { full?: boolean
   const state = await getSyncState();
   const since = !full && state?.lastSyncAt ? new Date(state.lastSyncAt).getTime() - OVERLAP_MS : 0;
 
+  // Sync incremental: a Umbler ordena por última mensagem (desc), então a paginação para
+  // no primeiro chat sem atividade desde o último sync. No completo, lê o histórico todo.
+  const chatOpts = since > 0 ? { activeSince: since } : { maxItems: FULL_SYNC_MAX_CHATS };
   const [open, closed] = await Promise.all([
-    UmblerService.getChats({ chatState: 'Open', memberId: agentMemberId }),
-    UmblerService.getChats({ chatState: 'Closed', memberId: agentMemberId }),
+    UmblerService.getChats({ chatState: 'Open', memberId: agentMemberId, ...chatOpts }),
+    UmblerService.getChats({ chatState: 'Closed', memberId: agentMemberId, ...chatOpts }),
   ]);
   const chatsById = new Map<string, any>();
   for (const chat of [...open.items, ...closed.items]) chatsById.set(chat.id, chat);
@@ -127,11 +134,11 @@ async function runSync(agentMemberId: string, { full = false }: { full?: boolean
   let failedChats = 0;
   await mapWithConcurrency(chats, CONCURRENCY, async (chat) => {
     try {
-      const messages = await UmblerService.getChatMessagesWithBilling(chat.id);
+      const messages = await UmblerService.getChatMessagesWithBilling(chat.id, { since: since > 0 ? since : undefined });
       records.push(...buildUsageRecords(chat, messages, agentMemberId));
     } catch (error: any) {
       failedChats++;
-      console.error(`[FinOps] Erro ao ler mensagens do chat ${chat.id}:`, error.response?.status || error.message);
+      logError(`FinOps mensagens do chat ${chat.id}`, error);
     }
   });
 
@@ -150,9 +157,9 @@ async function runSync(agentMemberId: string, { full = false }: { full?: boolean
     inserted = result.upsertedCount;
   }
 
-  // getChats devolve lista vazia em caso de erro; nesse caso (ou se algum chat falhou) o marcador
-  // não avança, para a próxima execução reler o mesmo período em vez de pular mensagens
-  const complete = chatsById.size > 0 && failedChats === 0;
+  // Se a Umbler falhar, getChats lança exceção e o marcador não é gravado. Se algum chat
+  // falhou, o marcador também não avança, para a próxima execução reler o mesmo período.
+  const complete = failedChats === 0;
   const lastSyncAt = complete ? startedAt.toISOString() : (state?.lastSyncAt ? String(state.lastSyncAt) : null);
   const summary = { chatsScanned: chats.length, recordsFound: records.length, inserted, failedChats };
   await setSyncState(complete ? { lastSyncAt, lastResult: summary } : { lastResult: summary });
