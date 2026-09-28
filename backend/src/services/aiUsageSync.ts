@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import { getDb } from '../config/db.js';
 import { getEncoding, Tiktoken } from 'js-tiktoken';
 import AiUsage from '../models/AiUsage.js';
 import { UmblerService } from './umbler.js';
@@ -34,12 +34,12 @@ function creditValue() {
 const eventTime = (m: any) => new Date(m.createdAtUTC || m.eventAtUTC || 0).getTime();
 
 async function getSyncState() {
-  const db = mongoose.connection.db!;
+  const db = getDb();
   return db.collection('syncState').findOne({ key: SYNC_STATE_KEY });
 }
 
 async function setSyncState(fields: Record<string, unknown>) {
-  const db = mongoose.connection.db!;
+  const db = getDb();
   await db.collection('syncState').updateOne({ key: SYNC_STATE_KEY }, { $set: fields }, { upsert: true });
 }
 

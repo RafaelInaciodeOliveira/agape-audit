@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { MongoClient, Db } from 'mongodb';
+import { getDb, type Db } from '../config/db.js';
 import { UmblerService } from '../services/umbler.js';
 import { logError } from '../utils/logger.js';
 import {
@@ -15,17 +15,13 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 router.param('moduleName', paramValidator(moduleNameSchema));
 router.param('id', paramValidator(idSchema));
 
-let dbInstance: Db | null = null;
-async function getDb(): Promise<Db> {
-  if (dbInstance) return dbInstance;
-  const client = new MongoClient(process.env.MONGODB_URI as string);
-  await client.connect();
-  dbInstance = client.db();
-  Promise.all([
-    dbInstance.collection('knowledgeBackups').createIndex({ module: 1, createdAt: -1, id: -1 }),
-    dbInstance.collection('knowledgeBackups').createIndex({ id: 1 }),
-  ]).catch((err) => logError('Índices knowledgeBackups', err));
-  return dbInstance;
+// Chamado uma vez na inicialização do servidor, depois da conexão com o banco.
+export async function ensureKnowledgeIndexes() {
+  const db = getDb();
+  await Promise.all([
+    db.collection('knowledgeBackups').createIndex({ module: 1, createdAt: -1, id: -1 }),
+    db.collection('knowledgeBackups').createIndex({ id: 1 }),
+  ]);
 }
 
 function newId() {
@@ -188,7 +184,7 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
 // versão é buscado sob demanda em GET /backups/:id.
 router.get('/module/:moduleName/backups', async (req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const query = parseInput(backupsQuerySchema, req.query, res);
     if (!query) return;
     const limit = query.limit ?? 20;
@@ -234,7 +230,7 @@ router.get('/module/:moduleName/backups', async (req: Request, res: Response) =>
 // para que o diff não mostre diferenças falsas.
 router.get('/module/:moduleName/current-text', async (req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const items = await loadModuleItems(db, req.params.moduleName);
     return res.json({ content: buildTxtFromItems(items), itemCount: items.length });
   } catch (error: any) {
@@ -244,7 +240,7 @@ router.get('/module/:moduleName/current-text', async (req: Request, res: Respons
 
 router.get('/backups/:id', async (req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const backup = await db.collection('knowledgeBackups').findOne({ id: req.params.id }, { projection: { _id: 0 } });
     if (!backup) return res.status(404).json({ error: 'Backup não encontrado.' });
     return res.json(backup);
@@ -255,7 +251,7 @@ router.get('/backups/:id', async (req: Request, res: Response) => {
 
 router.delete('/backups/:id', async (req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const { deletedCount } = await db.collection('knowledgeBackups').deleteOne({ id: req.params.id });
     if (!deletedCount) return res.status(404).json({ error: 'Backup não encontrado.' });
     return res.json({ success: true });
@@ -270,7 +266,7 @@ router.post('/sync-umbler', async (req: Request, res: Response) => {
     if (!input) return;
     const { moduleName, knowledgeBaseId } = input;
 
-    const db = await getDb();
+    const db = getDb();
     const items = await loadModuleItems(db, moduleName);
 
     if (items.length === 0) return res.status(404).json({ error: 'Módulo não encontrado no banco local.' });
@@ -322,7 +318,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
       updatedAt: nowIso,
     });
 
-    const db = await getDb();
+    const db = getDb();
     const previousItems = await loadModuleItems(db, currentModule);
     const previousKbId = previousItems[0]?.knowledgeBaseId;
     
@@ -353,7 +349,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     if (!input) return;
     const { textContent } = input;
 
-    const db = await getDb();
+    const db = getDb();
     
     const existingItems = await loadModuleItems(db, moduleName);
 
@@ -403,7 +399,7 @@ router.get('/export-txt', async (req: Request, res: Response) => {
     const filter: Record<string, string> = {};
     if (moduleName) filter.module = moduleName;
 
-    const db = await getDb();
+    const db = getDb();
     const allItems = await db.collection('knowledge').find(filter).toArray();
     // Agrupa por módulo mantendo a ordem interna de cada um.
     const items = moduleName
@@ -431,7 +427,7 @@ router.get('/export-txt', async (req: Request, res: Response) => {
 
 router.delete('/module/:moduleName', async (req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const existingItems = await db.collection('knowledge').find({ module: req.params.moduleName }).toArray();
     const knowledgeBaseId = existingItems[0]?.knowledgeBaseId;
 
@@ -454,7 +450,7 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
 
 router.get('/modules', async (_req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const modules = await db.collection('knowledge').distinct('module');
     return res.json(modules);
   } catch (error: any) {
@@ -464,7 +460,7 @@ router.get('/modules', async (_req: Request, res: Response) => {
 
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const items = await db.collection('knowledge').find({}).sort({ module: 1, section: 1 }).toArray();
     return res.json(items);
   } catch (error: any) {

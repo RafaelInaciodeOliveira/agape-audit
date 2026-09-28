@@ -1,10 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
-import { MongoClient, Db } from 'mongodb';
+import { connectDatabase, getDb } from './config/db.js';
 import { UmblerService } from './services/umbler.js';
-import knowledgeRoutes from './routes/knowledgeRoutes.js';
+import knowledgeRoutes, { ensureKnowledgeIndexes } from './routes/knowledgeRoutes.js';
 import finopsRoutes from './routes/finopsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import { authMiddleware } from './middlewares/authMiddleware.js';
@@ -38,16 +37,6 @@ app.use(cors({
 // Limite maior que o padrão (100kb): webhooks do Strapi com rich text e passos passam disso
 app.use(express.json({ limit: '5mb' }));
 
-const mongoUri = process.env.MONGODB_URI || '';
-if (mongoUri) {
-  mongoose.connect(mongoUri)
-    .then(() => {
-      console.log('🍃 Mongoose conectado com sucesso ao MongoDB Atlas!');
-      scheduleAiUsageSync();
-    })
-    .catch((err) => logError('Mongoose connect', err));
-}
-
 // Importa periodicamente da Umbler o consumo (créditos) das respostas do Ágape para o painel de Custos de IA
 function scheduleAiUsageSync() {
   if (!process.env.UMBLER_TOKEN) return;
@@ -67,15 +56,6 @@ app.use('/api', (req, res, next) => (PUBLIC_API_PATHS.has(req.path) ? next() : a
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/finops', finopsRoutes);
 
-let dbInstance: Db | null = null;
-async function getDb(): Promise<Db> {
-  if (dbInstance) return dbInstance;
-  const client = new MongoClient(mongoUri);
-  await client.connect();
-  dbInstance = client.db();
-  return dbInstance;
-}
-
 function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -93,7 +73,7 @@ const DEFAULT_TOPICS: Array<{ name: string; subtopics: string[] }> = [
 ];
 
 async function initDb() {
-  const db = await getDb();
+  const db = getDb();
   await db.collection('audits').createIndex({ chatId: 1 }, { unique: true });
   await db.collection('messageAudits').createIndex({ chatId: 1, messageId: 1 }, { unique: true });
 
@@ -121,7 +101,6 @@ async function initDb() {
     }
   }
 }
-initDb().catch((err) => logError('initDb', err));
 
 const CARTEIRAS = ['ANTARES', 'ARCTURUS', 'ALPHA', 'SIGMA', 'SIRIUS'];
 const AGAPE_MEMBER_ID = 'afDzOd4PFUB3xLbX';
@@ -148,7 +127,7 @@ app.get('/api/chats', async (req, res) => {
     const query = parseInput(chatsQuerySchema, req.query, res);
     if (!query) return;
     const { carteira, search, attendantId, status } = query;
-    const db = await getDb();
+    const db = getDb();
     
     const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
     const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
@@ -257,7 +236,7 @@ app.get('/api/chats', async (req, res) => {
 
 app.post('/api/chats/:id/hide', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     await db.collection('hiddenChats').updateOne(
       { chatId: req.params.id },
       { $set: { chatId: req.params.id, hiddenAt: new Date().toISOString() } },
@@ -269,7 +248,7 @@ app.post('/api/chats/:id/hide', async (req, res) => {
 
 app.post('/api/chats/:id/unhide', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     await db.collection('hiddenChats').deleteOne({ chatId: req.params.id });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
@@ -288,7 +267,7 @@ app.post('/api/audits', async (req, res) => {
     const input = parseInput(chatAuditBodySchema, req.body, res);
     if (!input) return;
     const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = input;
-    const db = await getDb();
+    const db = getDb();
     
     let isViolated = violatedPromptRules ? 1 : 0;
     let isKbFail = knowledgeBaseFail ? 1 : 0;
@@ -328,7 +307,7 @@ app.get('/api/config', (_req, res) => {
 
 app.get('/api/fail-reasons', async (_req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const reasons = await db.collection('failReasons').find({}, { projection: { _id: 0 } }).sort({ createdAt: 1 }).toArray();
     res.json(reasons);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
@@ -339,7 +318,7 @@ app.post('/api/fail-reasons', async (req, res) => {
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     const { name } = body;
-    const db = await getDb();
+    const db = getDb();
     const id = newId();
     await db.collection('failReasons').insertOne({ id, name, createdAt: new Date().toISOString() });
     res.json({ id, name });
@@ -348,7 +327,7 @@ app.post('/api/fail-reasons', async (req, res) => {
 
 app.put('/api/fail-reasons/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     await db.collection('failReasons').updateOne({ id: req.params.id }, { $set: { name: body.name } });
@@ -358,7 +337,7 @@ app.put('/api/fail-reasons/:id', async (req, res) => {
 
 app.delete('/api/fail-reasons/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     await db.collection('failReasons').deleteOne({ id: req.params.id });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
@@ -366,7 +345,7 @@ app.delete('/api/fail-reasons/:id', async (req, res) => {
 
 app.get('/api/topics', async (_req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const topics = await db.collection('topics').find({}, { projection: { _id: 0 } }).sort({ name: 1 }).toArray();
     const subtopics = await db.collection('subtopics').find({}, { projection: { _id: 0 } }).sort({ name: 1 }).toArray();
     const result = topics.map((t: any) => ({ ...t, subtopics: subtopics.filter((s: any) => s.topicId === t.id) }));
@@ -379,7 +358,7 @@ app.post('/api/topics', async (req, res) => {
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     const { name } = body;
-    const db = await getDb();
+    const db = getDb();
     const id = newId();
     await db.collection('topics').insertOne({ id, name, createdAt: new Date().toISOString() });
     res.json({ id, name, subtopics: [] });
@@ -388,7 +367,7 @@ app.post('/api/topics', async (req, res) => {
 
 app.put('/api/topics/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     await db.collection('topics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
@@ -398,7 +377,7 @@ app.put('/api/topics/:id', async (req, res) => {
 
 app.delete('/api/topics/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     await db.collection('subtopics').deleteMany({ topicId: req.params.id });
     await db.collection('topics').deleteOne({ id: req.params.id });
     res.json({ success: true });
@@ -407,7 +386,7 @@ app.delete('/api/topics/:id', async (req, res) => {
 
 app.post('/api/topics/:topicId/subtopics', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     const id = newId();
@@ -418,7 +397,7 @@ app.post('/api/topics/:topicId/subtopics', async (req, res) => {
 
 app.put('/api/subtopics/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const body = parseInput(nameBodySchema, req.body, res);
     if (!body) return;
     await db.collection('subtopics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
@@ -428,7 +407,7 @@ app.put('/api/subtopics/:id', async (req, res) => {
 
 app.delete('/api/subtopics/:id', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     await db.collection('subtopics').deleteOne({ id: req.params.id });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
@@ -436,7 +415,7 @@ app.delete('/api/subtopics/:id', async (req, res) => {
 
 app.get('/api/chats/:id/message-audits', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const audits = await db.collection('messageAudits').find({ chatId: req.params.id }, { projection: { _id: 0 } }).toArray();
     const byMessageId: Record<string, any> = {};
     for (const a of audits) byMessageId[a.messageId] = a;
@@ -450,7 +429,7 @@ app.post('/api/message-audits', async (req, res) => {
     if (!input) return;
     const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = input;
     
-    const db = await getDb();
+    const db = getDb();
     
     // 1. Busca a auditoria existente para não zerar a flag de QA se ela já foi treinada
     const existingAudit = await db.collection('messageAudits').findOne({ chatId, messageId });
@@ -511,7 +490,7 @@ app.get('/api/reports/themes', async (req, res) => {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
-    const db = await getDb();
+    const db = getDb();
     const [msgAudits, chatAudits, topics, subtopics] = await Promise.all([
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
@@ -555,7 +534,7 @@ app.get('/api/reports/quality', async (req, res) => {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
-    const db = await getDb();
+    const db = getDb();
     const [audits, chatAudits, allReasons] = await Promise.all([
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
@@ -628,7 +607,7 @@ app.get('/api/reports/value', async (req, res) => {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
-    const db = await getDb();
+    const db = getDb();
     const [chatAudits, messageAudits, qaGenerated] = await Promise.all([
       db.collection('audits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
       db.collection('messageAudits').find(dateFilter, { projection: { _id: 0 } }).toArray(),
@@ -676,7 +655,7 @@ app.get('/api/reports/export', async (req, res) => {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
     }
 
-    const db = await getDb();
+    const db = getDb();
     
     const [messageAuditsRaw, chatAuditsRaw, hiddenChatsList, topics, subtopics, failReasons] = await Promise.all([
       db.collection('messageAudits').find(dateFilter).sort({ createdAt: 1 }).toArray(), // 1 para ordem cronológica
@@ -883,7 +862,7 @@ app.post('/api/webhooks/strapi', async (req, res) => {
 
     // Chave estável do artigo no Strapi: evita duplicar o card a cada create/update/publish
     const strapiKey = entryId != null ? `${model || uid || 'entry'}:${entryId}` : null;
-    const db = await getDb();
+    const db = getDb();
 
     if (event === 'entry.unpublish' || event === 'entry.delete') {
       if (!strapiKey) return res.json({ success: true, message: 'Ignorado: entrada sem id.' });
@@ -963,7 +942,7 @@ app.post('/api/webhooks/strapi', async (req, res) => {
 // --- ROTA DO DASHBOARD DE BOAS-VINDAS ---
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const db = await getDb();
+    const db = getDb();
     const now = new Date();
     const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
     const lastWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -1022,6 +1001,24 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor Restaurado e Mongoose Conectado na porta ${PORT}!`);
+
+// Ordem de inicialização: banco conectado → índices/seed → sync agendado → HTTP.
+// Assim nenhuma rota roda antes de a conexão estar pronta.
+async function start() {
+  await connectDatabase();
+  console.log('✅ [MongoDB] Conectado com sucesso (conexão única via Mongoose).');
+
+  await initDb();
+  await ensureKnowledgeIndexes();
+  scheduleAiUsageSync();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor HTTP escutando na porta ${PORT}.`);
+  });
+}
+
+start().catch((err) => {
+  logError('Inicialização do servidor', err);
+  console.error('❌ Servidor não iniciado: não foi possível conectar/preparar o MongoDB.');
+  process.exit(1);
 });
