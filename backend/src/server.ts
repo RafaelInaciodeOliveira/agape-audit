@@ -6,12 +6,26 @@ import { MongoClient, Db } from 'mongodb';
 import { UmblerService } from './services/umbler.js';
 import knowledgeRoutes from './routes/knowledgeRoutes.js';
 import finopsRoutes from './routes/finopsRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import { authMiddleware } from './middlewares/authMiddleware.js';
 import { syncAiUsageFromUmbler } from './services/aiUsageSync.js';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// Só o frontend configurado pode chamar a API pelo navegador. FRONTEND_URL aceita
+// várias origens separadas por vírgula. Requisições sem Origin (servidor a servidor,
+// como o webhook do Strapi) não são afetadas por CORS.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin)),
+  // Necessário para o frontend ler o nome dos arquivos baixados (TXT/CSV).
+  exposedHeaders: ['Content-Disposition'],
+}));
 // Limite maior que o padrão (100kb): webhooks do Strapi com rich text e passos passam disso
 app.use(express.json({ limit: '5mb' }));
 
@@ -34,6 +48,12 @@ function scheduleAiUsageSync() {
   setTimeout(run, 10_000);
   setInterval(run, minutes * 60_000);
 }
+
+// Toda rota em /api exige JWT, exceto as listadas aqui. O webhook do Strapi tem
+// autenticação própria (STRAPI_WEBHOOK_SECRET).
+const PUBLIC_API_PATHS = new Set(['/login', '/webhooks/strapi']);
+app.use('/api', authRoutes);
+app.use('/api', (req, res, next) => (PUBLIC_API_PATHS.has(req.path) ? next() : authMiddleware(req, res, next)));
 
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/finops', finopsRoutes);

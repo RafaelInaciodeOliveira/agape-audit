@@ -10,10 +10,9 @@ import {
   FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { API_URL, fetcher, downloadFile } from '../lib/api';
 import BackupHistoryModal from './BackupHistoryModal';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 interface KnowledgeItem {
   id?: string;
@@ -187,9 +186,13 @@ export default function BaseConhecimentoPage() {
     }
   };
 
-  const handleDownloadModule = (moduleName: string) => {
+  const handleDownloadModule = async (moduleName: string) => {
     const url = `${API_URL}/knowledge/export-txt?moduleName=${encodeURIComponent(moduleName)}`;
-    window.open(url, '_blank');
+    try {
+      await downloadFile(url, `${moduleName}.txt`);
+    } catch {
+      toast.error(`Erro ao baixar "${moduleName}".`);
+    }
   };
 
   const confirmDeleteModule = async () => {

@@ -3,14 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
-import { 
+import { Toaster, toast } from 'sonner';
+import { useAuth } from '../hooks/useAuth';
+import { API_URL, downloadFile } from '../lib/api';
+import {
   ArrowLeft, BarChart3, Star, Calendar,
   GraduationCap, ListChecks, FileSpreadsheet, LucideIcon,
   TrendingUp, Activity, CheckCircle2, MessageSquareWarning,
   PieChart, Target, AlertTriangle, Download // <-- Download importado aqui
 } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 // --- Interfaces Atualizadas ---
 interface ThemeRow { topicName: string; subtopicName?: string; total: number; kbFailCount: number; }
@@ -170,6 +171,7 @@ const getToday = () => {
 };
 
 export default function ReportsPage() {
+  const isAuthorized = useAuth();
   const [themes, setThemes] = useState<ThemeRow[]>([]);
   const [quality, setQuality] = useState<QualityData | null>(null);
   const [value, setValue] = useState<ValueData | null>(null);
@@ -182,7 +184,7 @@ export default function ReportsPage() {
   useEffect(() => {
     document.title = 'Auditoria Ágape';
     const load = async () => {
-      if (!startDate || !endDate) return;
+      if (!isAuthorized || !startDate || !endDate) return;
 
       setLoading(true);
       try {
@@ -210,7 +212,21 @@ export default function ReportsPage() {
     }, 400);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [startDate, endDate]);
+  }, [isAuthorized, startDate, endDate]);
+
+  const handleExportCsv = async (reasonId?: string) => {
+    const params = new URLSearchParams({ startDate, endDate });
+    if (reasonId) params.set('reasonId', reasonId);
+    try {
+      await downloadFile(`${API_URL}/reports/export?${params.toString()}`, 'relatorio_auditoria.csv');
+    } catch {
+      toast.error('Erro ao exportar o CSV.');
+    }
+  };
+
+  if (!isAuthorized) {
+    return <div className="h-screen w-screen bg-slate-950"></div>;
+  }
 
   const calculateConformity = () => {
     if (!quality || quality.totalAudited === 0) return '—';
@@ -231,7 +247,7 @@ export default function ReportsPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased p-6 md:p-10 w-full mx-auto">
-      
+      <Toaster theme="dark" position="top-right" richColors />
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-8 max-w-7xl mx-auto">
         <div className="flex items-center gap-4">
           <Link href="/" className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-blue-300 hover:bg-slate-800 transition-all shadow-sm">
@@ -256,9 +272,9 @@ export default function ReportsPage() {
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent text-sm text-slate-200 outline-none cursor-pointer font-semibold [color-scheme:dark]" />
             </div>
           </div>
-          <a href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}`} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm">
+          <button type="button" onClick={() => handleExportCsv()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-sm font-bold text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all shadow-sm cursor-pointer">
             <FileSpreadsheet className="w-4 h-4" /> Exportar Todos (CSV)
-          </a>
+          </button>
         </div>
       </div>
 
@@ -410,10 +426,11 @@ export default function ReportsPage() {
                       const pct = Math.max(2, (r.count / maxCount) * 100);
                       
                       return (
-                        <a 
-                          key={r.id} 
-                          href={`${API_URL}/reports/export?startDate=${startDate}&endDate=${endDate}&reasonId=${r.id}`}
-                          className="relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-purple-500/40 hover:bg-slate-900 transition-all cursor-pointer"
+                        <button
+                          type="button"
+                          key={r.id}
+                          onClick={() => handleExportCsv(r.id)}
+                          className="w-full text-left relative overflow-hidden bg-slate-950/80 rounded-xl border border-slate-800 flex items-center justify-between p-3 group hover:border-purple-500/40 hover:bg-slate-900 transition-all cursor-pointer"
                           title={`Baixar relatórios filtrados por: ${r.name}`}
                         >
                           <div className="absolute left-0 top-0 bottom-0 bg-purple-500/15 transition-all duration-1000" style={{ width: `${pct}%` }}></div>
@@ -440,7 +457,7 @@ export default function ReportsPage() {
                               <span className="text-[10px] font-bold uppercase">Baixar CSV</span>
                             </div>
                           </div>
-                        </a>
+                        </button>
                       );
                     })
                   )}

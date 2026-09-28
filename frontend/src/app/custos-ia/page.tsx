@@ -12,10 +12,9 @@ import {
   ArrowLeft, Calendar, Coins, Cpu, Crown, Receipt, BarChart3, MessageSquareWarning, RefreshCw, ChevronLeft, ChevronRight, LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { API_URL, fetcher } from '../lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 // Cotação do dólar (AwesomeAPI). Usa "ask", o preço de venda do dólar: quanto custa comprar US$ 1 em reais.
 const EXCHANGE_URL = 'https://economia.awesomeapi.com.br/last/USD-BRL';

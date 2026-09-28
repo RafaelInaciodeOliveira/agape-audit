@@ -3,7 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, User, ArrowRight, Activity } from 'lucide-react';
+import axios from 'axios';
 import { Toaster, toast } from 'sonner';
+import { API_URL } from '../lib/api';
+import { hasValidToken, setToken, clearToken } from '../lib/auth';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -12,8 +15,14 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const token = sessionStorage.getItem('agape_audit_token');
-    if (token) router.push('/');
+    if (hasValidToken()) {
+      router.replace('/');
+      return;
+    }
+    clearToken();
+    if (new URLSearchParams(window.location.search).get('expired')) {
+      toast.info('Sua sessão expirou. Faça login novamente.', { id: 'session-expired' });
+    }
   }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -21,28 +30,15 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (res.ok) {
-        toast.success('Acesso liberado! Bem-vindo(a).');
-        
-        sessionStorage.setItem('agape_audit_token', 'autenticado');
-        
-        const now = new Date();
-        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-        sessionStorage.setItem('agape_audit_expires', endOfDay.toString());
-
-        router.push('/');
-      } else {
-        toast.error('Usuário ou senha incorretos.');
-        setIsLoading(false);
-      }
-    } catch {
-      toast.error('Erro ao conectar com o servidor.');
+      const res = await axios.post<{ token: string; expiresAt: number }>(`${API_URL}/login`, { username, password });
+      setToken(res.data.token);
+      toast.success('Acesso liberado! Bem-vindo(a).');
+      router.replace('/');
+    } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      if (status === 401 || status === 400) toast.error('Usuário ou senha incorretos.');
+      else if (status === 500) toast.error('Login não configurado no servidor. Verifique o backend/.env.');
+      else toast.error('Erro ao conectar com o servidor.');
       setIsLoading(false);
     }
   };

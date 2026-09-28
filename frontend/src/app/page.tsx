@@ -10,13 +10,13 @@ import {
   Star, BookOpen, Send, RefreshCw, Clock, Search, 
   Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
   Activity, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Coins, Settings, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
+  ArrowLeft, BarChart3, Coins, Settings, LogOut, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
 } from 'lucide-react';
-import { useAuth } from './hooks/useAuth'; 
+import { useAuth } from './hooks/useAuth';
+import { API_URL, fetcher } from './lib/api';
+import { logout } from './lib/auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
 // --- TIPAGENS ---
 interface Subtopic { id: string; name: string; }
@@ -849,6 +849,14 @@ export default function AuditDashboard() {
               title="Configurações (Temas e Motivos)"
             >
               <Settings className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => logout()}
+              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-red-300 hover:border-red-500/40 active:scale-90 transition-all duration-200 cursor-pointer shadow-sm"
+              title="Sair"
+              aria-label="Sair"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
 
