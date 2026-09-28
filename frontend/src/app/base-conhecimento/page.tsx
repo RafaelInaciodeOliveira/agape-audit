@@ -4,13 +4,13 @@ import React, { useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import axios from 'axios';
 import Link from 'next/link';
-import { diffLines } from 'diff';
 import { Toaster, toast } from 'sonner';
 import { 
   BookOpen, Download, Upload, ArrowLeft, 
-  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, Clock, ChevronDown
+  FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import BackupHistoryModal from './BackupHistoryModal';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
@@ -59,25 +59,6 @@ function highlightText(text: string, term: string) {
   );
 }
 
-// Helper para reconstruir o texto atual e comparar com o backup
-function buildCurrentText(moduleName: string, allItems: KnowledgeItem[]) {
-  const moduleItems = allItems.filter(item => item.module === moduleName);
-  let txtOutput = '';
-  let lastSection = '';
-  moduleItems.forEach(item => {
-    if (item.source?.includes('raw')) {
-      txtOutput += `${item.content}\n`;
-      return;
-    }
-    if (item.section && item.section !== lastSection) {
-      txtOutput += `\n## ${item.section}\n`;
-      lastSection = item.section;
-    }
-    txtOutput += `* ${item.title}: ${item.content}\n`;
-  });
-  return txtOutput.trim();
-}
-
 export default function BaseConhecimentoPage() {
   const isAuthorized = useAuth();
   const [uploading, setUploading] = useState(false);
@@ -94,14 +75,8 @@ export default function BaseConhecimentoPage() {
   const [isKbDropdownOpen, setIsKbDropdownOpen] = useState(false);
   const [isEditKbDropdownOpen, setIsEditKbDropdownOpen] = useState(false);
 
-  // Estados do Histórico de Backups
   const [viewingBackups, setViewingBackups] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [backupsList, setBackupsList] = useState<any[]>([]);
-  const [loadingBackups, setLoadingBackups] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [selectedBackup, setSelectedBackup] = useState<any | null>(null);
-  const [backupToDelete, setBackupToDelete] = useState<string | null>(null);
+  const [openingEditor, setOpeningEditor] = useState<string | null>(null);
 
   const [uploadKbId, setUploadKbId] = useState('');
   const [autoSync, setAutoSync] = useState(false);
@@ -232,10 +207,18 @@ export default function BaseConhecimentoPage() {
     }
   };
 
-  const handleOpenEditor = (moduleName: string) => {
-    setEditText(buildCurrentText(moduleName, items));
-    setEditKbId(moduleKbId(moduleName));
-    setEditingModule(moduleName);
+  const handleOpenEditor = async (moduleName: string) => {
+    setOpeningEditor(moduleName);
+    try {
+      const res = await axios.get<{ content: string }>(`${API_URL}/knowledge/module/${encodeURIComponent(moduleName)}/current-text`);
+      setEditText(res.data.content);
+      setEditKbId(moduleKbId(moduleName));
+      setEditingModule(moduleName);
+    } catch {
+      toast.error('Erro ao carregar o conteúdo do módulo.');
+    } finally {
+      setOpeningEditor(null);
+    }
   };
 
   const handleSaveEditor = async () => {
@@ -276,52 +259,18 @@ export default function BaseConhecimentoPage() {
     toast.info(`Baixando ${modules.length} arquivos separadamente...`);
   };
 
-  const handleOpenBackups = async (moduleName: string) => {
-    setViewingBackups(moduleName);
-    setSelectedBackup(null);
-    setLoadingBackups(true);
-    try {
-      const res = await axios.get(`${API_URL}/knowledge/module/${encodeURIComponent(moduleName)}/backups`);
-      setBackupsList(res.data);
-    } catch {
-      toast.error("Erro ao carregar histórico de backups.");
-    } finally {
-      setLoadingBackups(false);
-    }
-  };
-
-  const handleRestoreBackup = () => {
-    if (!selectedBackup || !viewingBackups) return;
-    setEditText(selectedBackup.content);
+  const handleRestoreBackup = (content: string) => {
+    if (!viewingBackups) return;
+    setEditText(content);
     setEditKbId(moduleKbId(viewingBackups));
     setEditingModule(viewingBackups);
     setViewingBackups(null);
     toast.info('Texto do backup carregado! Revise e clique em "Salvar Alterações" para confirmar.');
   };
 
-  const confirmDeleteBackup = async () => {
-    if (!backupToDelete) return;
-    try {
-      await axios.delete(`${API_URL}/knowledge/backups/${backupToDelete}`);
-      toast.success("Backup apagado com sucesso!");
-      setBackupsList(prev => prev.filter(b => b.id !== backupToDelete));
-      if (selectedBackup?.id === backupToDelete) {
-        setSelectedBackup(null);
-      }
-    } catch {
-      toast.error("Erro ao apagar o backup.");
-    } finally {
-      setBackupToDelete(null);
-    }
-  };
-
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950"></div>;
   }
-
-  // Lógica do DIFF
-  const currentLiveText = viewingBackups ? buildCurrentText(viewingBackups, items) : '';
-  const diffResult = selectedBackup ? diffLines(currentLiveText, selectedBackup.content) : [];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-8 font-sans overflow-x-hidden">
@@ -523,7 +472,7 @@ export default function BaseConhecimentoPage() {
                                   </span>
 
                                   <button
-                                    onClick={() => handleOpenBackups(moduleName)}
+                                    onClick={() => setViewingBackups(moduleName)}
                                     title="Histórico de Backups"
                                     className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                                   >
@@ -532,6 +481,7 @@ export default function BaseConhecimentoPage() {
 
                                   <button
                                     onClick={() => handleOpenEditor(moduleName)}
+                                    disabled={openingEditor === moduleName}
                                     title="Editar conteúdo"
                                     className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                                   >
@@ -684,7 +634,7 @@ export default function BaseConhecimentoPage() {
                               </button>
                               
                               <button
-                                onClick={() => handleOpenBackups(moduleName)}
+                                onClick={() => setViewingBackups(moduleName)}
                                 title="Histórico de Backups"
                                 className="p-2 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                               >
@@ -693,6 +643,7 @@ export default function BaseConhecimentoPage() {
 
                               <button
                                 onClick={() => handleOpenEditor(moduleName)}
+                                disabled={openingEditor === moduleName}
                                 title="Editar conteúdo"
                                 className="p-2 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg transition-all cursor-pointer"
                               >
@@ -717,166 +668,13 @@ export default function BaseConhecimentoPage() {
         )}
       </div>
 
-      {/* MODAL DE HISTÓRICO DE BACKUPS COM DIFF VISUAL */}
       {viewingBackups && (
-        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
-          <div className="bg-slate-950 border border-slate-800 rounded-3xl w-full max-w-6xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
-              <div>
-                <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
-                  <History className="w-5 h-5 text-amber-400" /> Histórico de Versões
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">Backups salvos automaticamente de: <span className="text-amber-300 font-semibold">{viewingBackups}</span></p>
-              </div>
-              <button onClick={() => setViewingBackups(null)} className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex flex-1 overflow-hidden">
-              <div className="w-64 border-r border-slate-800 bg-slate-900/30 overflow-y-auto custom-scrollbar p-4 space-y-2">
-                {loadingBackups ? (
-                  <div className="text-center text-slate-500 text-xs py-10 flex flex-col items-center gap-2">
-                    <RefreshCw className="w-5 h-5 animate-spin text-amber-500" /> Carregando...
-                  </div>
-                ) : backupsList.length === 0 ? (
-                  <div className="text-center text-slate-500 text-xs py-10">
-                    Nenhum backup encontrado.
-                  </div>
-                ) : (
-                  backupsList.map((bkp, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setSelectedBackup(bkp)}
-                      className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
-                        selectedBackup?.id === bkp.id 
-                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
-                          : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300 hover:bg-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 font-bold text-sm mb-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        {new Date(bkp.createdAt).toLocaleDateString('pt-BR')}
-                      </div>
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        às {new Date(bkp.createdAt).toLocaleTimeString('pt-BR')}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-
-              <div className="flex-1 bg-slate-950 p-6 flex flex-col">
-                {selectedBackup ? (
-                  <>
-                    <div className="flex flex-col gap-3 mb-4">
-                      
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">Comparação de Versões</span>
-                        
-                        <div className="flex items-center gap-3 shrink-0">
-                          <button
-                            onClick={() => setBackupToDelete(selectedBackup.id)}
-                            className="flex items-center gap-1.5 bg-red-600/10 hover:bg-red-600/20 text-red-400 px-3 py-2 rounded-lg text-xs font-bold transition-all border border-red-500/30 cursor-pointer"
-                            title="Apagar este backup para sempre"
-                          >
-                            <Trash2 className="w-4 h-4" /> Apagar
-                          </button>
-                          
-                          <button
-                            onClick={handleRestoreBackup}
-                            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all shadow-lg shadow-amber-600/20 cursor-pointer"
-                          >
-                            <RefreshCw className="w-4 h-4" /> Carregar no Editor
-                          </button>
-                        </div>
-                      </div>
-                      
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
-                        <span className="flex items-center gap-1.5 text-red-400 bg-red-500/10 px-2.5 py-1 rounded border border-red-500/20">
-                          <span className="font-black text-sm">-</span> Texto atual (será apagado/sobrescrito)
-                        </span>
-                        <span className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20">
-                          <span className="font-black text-sm">+</span> Texto do backup (voltará para o sistema)
-                        </span>
-                        <span className="flex items-center gap-1.5 text-slate-400 bg-slate-800/50 px-2.5 py-1 rounded border border-slate-700/50">
-                          Texto inalterado (será mantido)
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Renderização do Diff no estilo GitHub */}
-                    <div className="flex-1 bg-slate-900/90 border border-slate-800 rounded-xl py-2 text-sm font-mono overflow-y-auto custom-scrollbar">
-                      {diffResult.map((part, index) => {
-                        const lines = part.value.replace(/\n$/, '').split('\n');
-                        return lines.map((line, i) => (
-                          <div 
-                            key={`${index}-${i}`} 
-                            className={`px-4 py-1 flex items-start gap-4 ${
-                              part.added ? 'bg-emerald-500/10 text-emerald-300' :
-                              part.removed ? 'bg-red-500/10 text-red-300' :
-                              'text-slate-400 hover:bg-slate-800/50'
-                            }`}
-                          >
-                            <span className={`select-none shrink-0 text-center font-black ${
-                              part.added ? 'text-emerald-500' :
-                              part.removed ? 'text-red-500' :
-                              'text-slate-600'
-                            }`}>
-                              {part.added ? '+' : part.removed ? '-' : ' '}
-                            </span>
-                            <span className="whitespace-pre-wrap break-words">{line || ' '}</span>
-                          </div>
-                        ));
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-3">
-                    <FileText className="w-12 h-12 opacity-20" />
-                    <p className="text-sm font-medium">Selecione uma data na barra lateral para visualizar o comparativo.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE CONFIRMAÇÃO PARA APAGAR BACKUP */}
-      {backupToDelete && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center gap-3 text-red-400">
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-slate-100">Apagar Backup</h3>
-                <p className="text-xs text-slate-400">Ação irreversível no banco de dados</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/50 p-4 rounded-xl border border-slate-800 font-medium">
-              Tem certeza que deseja apagar esta versão de backup <strong className="text-white">permanentemente</strong>? Você não poderá recuperá-la depois.
-            </p>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setBackupToDelete(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmDeleteBackup}
-                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-lg shadow-red-600/20 transition-all cursor-pointer"
-              >
-                Sim, Apagar
-              </button>
-            </div>
-          </div>
-        </div>
+        <BackupHistoryModal
+          apiUrl={API_URL}
+          moduleName={viewingBackups}
+          onClose={() => setViewingBackups(null)}
+          onRestore={handleRestoreBackup}
+        />
       )}
 
       {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE MÓDULO */}

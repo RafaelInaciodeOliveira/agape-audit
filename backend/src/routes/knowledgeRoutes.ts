@@ -12,6 +12,10 @@ async function getDb(): Promise<Db> {
   const client = new MongoClient(process.env.MONGODB_URI as string);
   await client.connect();
   dbInstance = client.db();
+  Promise.all([
+    dbInstance.collection('knowledgeBackups').createIndex({ module: 1, createdAt: -1, id: -1 }),
+    dbInstance.collection('knowledgeBackups').createIndex({ id: 1 }),
+  ]).catch((err) => console.error('Erro ao criar índices de knowledgeBackups:', err.message));
   return dbInstance;
 }
 
@@ -20,7 +24,130 @@ function newId() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildTxtFromItems(items: any[]): string {
+type KnowledgeDoc = any;
+
+// Itens salvos pelo editor/upload têm `order` (posição no arquivo). Itens inseridos por
+// outras rotas (auditoria, Strapi) não têm e vão para o final, agrupados por seção.
+function sortModuleItems(items: KnowledgeDoc[]): KnowledgeDoc[] {
+  return [...items].sort((a, b) => {
+    const oa = typeof a.order === 'number' ? a.order : Infinity;
+    const ob = typeof b.order === 'number' ? b.order : Infinity;
+    if (oa !== ob) return oa - ob;
+    const sa = a.section || '';
+    const sb = b.section || '';
+    if (sa !== sb) return sa.localeCompare(sb);
+    return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  });
+}
+
+async function loadModuleItems(db: Db, moduleName: string): Promise<KnowledgeDoc[]> {
+  const items = await db.collection('knowledge').find({ module: moduleName }).toArray();
+  return sortModuleItems(items);
+}
+
+interface ParseBase {
+  module: string;
+  source: 'upload_txt' | 'manual';
+  knowledgeBaseId?: string;
+  knowledgeBaseName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function parseTxtToItems(textContent: string, base: ParseBase): KnowledgeDoc[] {
+  const lines = textContent.split('\n');
+  let currentSection = 'Geral';
+  let currentTitle = '';
+  let currentContent = '';
+  let hasStructuredItems = false;
+  const itemsToSave: KnowledgeDoc[] = [];
+
+  function flushItem() {
+    if (currentTitle.trim() || currentContent.trim()) {
+      itemsToSave.push({
+        id: newId(),
+        module: base.module,
+        section: currentSection,
+        title: currentTitle.trim() || 'Tópico',
+        content: currentContent.trim(),
+        source: base.source,
+        order: itemsToSave.length,
+        knowledgeBaseId: base.knowledgeBaseId,
+        knowledgeBaseName: base.knowledgeBaseName,
+        createdAt: base.createdAt,
+        updatedAt: base.updatedAt
+      });
+      currentTitle = '';
+      currentContent = '';
+    }
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+       if (currentContent) currentContent += '\n';
+       continue;
+    }
+    if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
+      flushItem();
+      currentSection = trimmed.replace(/^#+\s*/, '');
+      continue;
+    }
+    if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
+      flushItem();
+      currentSection = trimmed.replace(/^#+\s*/, '');
+      continue;
+    }
+    if (trimmed.startsWith('*')) {
+      hasStructuredItems = true;
+      flushItem();
+      const itemText = trimmed.substring(1).trim();
+      const colonIndex = itemText.indexOf(':');
+
+      if (colonIndex !== -1 && colonIndex < 120) {
+        currentTitle = itemText.substring(0, colonIndex).trim();
+        currentContent = itemText.substring(colonIndex + 1).trim() + '\n';
+      } else {
+        currentTitle = 'Instrução';
+        currentContent = itemText + '\n';
+      }
+      continue;
+    }
+    currentContent += trimmed + '\n';
+  }
+  flushItem();
+
+  if (!hasStructuredItems && itemsToSave.length === 1) {
+    itemsToSave[0].section = 'Documentação Técnica / Especificação';
+    itemsToSave[0].title = 'Estrutura Completa de Dados';
+    itemsToSave[0].source = `${base.source}_raw`;
+  }
+
+  return itemsToSave;
+}
+
+// Guarda o texto anterior do módulo antes de sobrescrevê-lo. Não cria backup quando nada
+// mudou ou quando o último backup já tem exatamente esse conteúdo.
+async function saveBackupIfChanged(db: Db, moduleName: string, oldText: string, newText: string, reason: 'edit' | 'upload') {
+  if (!oldText || oldText === newText) return;
+  const latest = await db.collection('knowledgeBackups')
+    .find({ module: moduleName }, { projection: { content: 1 } })
+    .sort({ createdAt: -1, id: -1 })
+    .limit(1)
+    .next();
+  if (latest?.content === oldText) return;
+  await db.collection('knowledgeBackups').insertOne({
+    id: newId(),
+    module: moduleName,
+    content: oldText,
+    reason,
+    size: oldText.length,
+    lineCount: oldText.split('\n').length,
+    createdAt: new Date().toISOString()
+  });
+}
+
+function buildTxtFromItems(items: KnowledgeDoc[]): string {
   let txtOutput = '';
   let lastSection = '';
   for (const item of items) {
@@ -47,24 +174,78 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
   }
 });
 
+// Lista paginada (cursor) dos backups de um módulo, sem o conteúdo — o texto de cada
+// versão é buscado sob demanda em GET /backups/:id.
 router.get('/module/:moduleName/backups', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
-    const backups = await db.collection('knowledgeBackups')
-      .find({ module: req.params.moduleName })
-      .sort({ createdAt: -1 })
-      .toArray();
-    return res.json(backups);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 20, 1), 100);
+    const cursorCreatedAt = typeof req.query.beforeCreatedAt === 'string' ? req.query.beforeCreatedAt : null;
+    const cursorId = typeof req.query.beforeId === 'string' ? req.query.beforeId : '';
+
+    const match: Record<string, unknown> = { module: req.params.moduleName };
+    if (cursorCreatedAt) {
+      match.$or = [
+        { createdAt: { $lt: cursorCreatedAt } },
+        { createdAt: cursorCreatedAt, id: { $lt: cursorId } },
+      ];
+    }
+
+    const docs = await db.collection('knowledgeBackups').aggregate([
+      { $match: match },
+      { $sort: { createdAt: -1, id: -1 } },
+      { $limit: limit + 1 },
+      {
+        $project: {
+          _id: 0,
+          id: 1,
+          module: 1,
+          createdAt: 1,
+          reason: { $ifNull: ['$reason', 'edit'] },
+          size: { $ifNull: ['$size', { $strLenCP: { $ifNull: ['$content', ''] } }] },
+        },
+      },
+    ]).toArray();
+
+    const hasMore = docs.length > limit;
+    const items = hasMore ? docs.slice(0, limit) : docs;
+    const last = items[items.length - 1];
+    const nextCursor = hasMore && last ? { beforeCreatedAt: last.createdAt, beforeId: last.id } : null;
+
+    return res.json({ items, nextCursor });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
   }
 });
 
-// NOVA ROTA: Apagar um backup específico
+// Texto atual do módulo, montado exatamente como o backup e o export são montados,
+// para que o diff não mostre diferenças falsas.
+router.get('/module/:moduleName/current-text', async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const items = await loadModuleItems(db, req.params.moduleName);
+    return res.json({ content: buildTxtFromItems(items), itemCount: items.length });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/backups/:id', async (req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const backup = await db.collection('knowledgeBackups').findOne({ id: req.params.id }, { projection: { _id: 0 } });
+    if (!backup) return res.status(404).json({ error: 'Backup não encontrado.' });
+    return res.json(backup);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 router.delete('/backups/:id', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
-    await db.collection('knowledgeBackups').deleteOne({ id: req.params.id });
+    const { deletedCount } = await db.collection('knowledgeBackups').deleteOne({ id: req.params.id });
+    if (!deletedCount) return res.status(404).json({ error: 'Backup não encontrado.' });
     return res.json({ success: true });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
@@ -77,7 +258,7 @@ router.post('/sync-umbler', async (req: Request, res: Response) => {
     if (!moduleName) return res.status(400).json({ error: 'Nome do módulo ausente.' });
 
     const db = await getDb();
-    const items = await db.collection('knowledge').find({ module: moduleName }).sort({ section: 1, createdAt: 1 }).toArray();
+    const items = await loadModuleItems(db, moduleName);
 
     if (items.length === 0) return res.status(404).json({ error: 'Módulo não encontrado no banco local.' });
 
@@ -115,77 +296,18 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
       textContent = textContent.slice(1);
     }
 
-    const lines = textContent.split('\n');
-    let currentSection = 'Geral';
-    let currentTitle = '';
-    let currentContent = '';
-    let hasStructuredItems = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const itemsToSave: any[] = [];
     const nowIso = new Date().toISOString();
-
-    function flushItem() {
-      if (currentTitle.trim() || currentContent.trim()) {
-        itemsToSave.push({
-          id: newId(),
-          module: currentModule,
-          section: currentSection,
-          title: currentTitle.trim() || 'Tópico',
-          content: currentContent.trim(),
-          source: 'upload_txt',
-          knowledgeBaseId,
-          knowledgeBaseName,
-          createdAt: nowIso,
-          updatedAt: nowIso
-        });
-        currentTitle = '';
-        currentContent = '';
-      }
-    }
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-         if (currentContent) currentContent += '\n';
-         continue;
-      }
-      if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
-        flushItem();
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-      if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
-        flushItem();
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-      if (trimmed.startsWith('*')) {
-        hasStructuredItems = true;
-        flushItem();
-        const itemText = trimmed.substring(1).trim();
-        const colonIndex = itemText.indexOf(':');
-
-        if (colonIndex !== -1 && colonIndex < 120) {
-          currentTitle = itemText.substring(0, colonIndex).trim();
-          currentContent = itemText.substring(colonIndex + 1).trim() + '\n';
-        } else {
-          currentTitle = 'Instrução';
-          currentContent = itemText + '\n';
-        }
-        continue;
-      }
-      currentContent += trimmed + '\n';
-    }
-    flushItem();
-
-    if (!hasStructuredItems && itemsToSave.length === 1) {
-      itemsToSave[0].section = 'Documentação Técnica / Especificação';
-      itemsToSave[0].title = 'Estrutura Completa de Dados';
-      itemsToSave[0].source = 'upload_txt_raw';
-    }
+    const itemsToSave = parseTxtToItems(textContent, {
+      module: currentModule,
+      source: 'upload_txt',
+      knowledgeBaseId,
+      knowledgeBaseName,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
 
     const db = await getDb();
-    const previousItems = await db.collection('knowledge').find({ module: currentModule }).toArray();
+    const previousItems = await loadModuleItems(db, currentModule);
     const previousKbId = previousItems[0]?.knowledgeBaseId;
     
     if (previousKbId && previousKbId !== knowledgeBaseId) {
@@ -197,6 +319,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
     }
 
     if (itemsToSave.length > 0) {
+      await saveBackupIfChanged(db, currentModule, buildTxtFromItems(previousItems), buildTxtFromItems(itemsToSave), 'upload');
       await db.collection('knowledge').deleteMany({ module: currentModule });
       await db.collection('knowledge').insertMany(itemsToSave);
     }
@@ -216,20 +339,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
     const db = await getDb();
     
-    const existingItems = await db.collection('knowledge')
-      .find({ module: moduleName })
-      .sort({ section: 1, createdAt: 1 })
-      .toArray();
-    
-    if (existingItems.length > 0) {
-      const oldText = buildTxtFromItems(existingItems);
-      await db.collection('knowledgeBackups').insertOne({
-        id: newId(),
-        module: moduleName,
-        content: oldText,
-        createdAt: new Date().toISOString()
-      });
-    }
+    const existingItems = await loadModuleItems(db, moduleName);
 
     const createdAt = existingItems.length > 0 && existingItems[0].createdAt ? existingItems[0].createdAt : new Date().toISOString();
     const updatedAt = new Date().toISOString();
@@ -238,73 +348,16 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     const knowledgeBaseId = req.body.knowledgeBaseId || previousKbId || undefined;
     const knowledgeBaseName = req.body.knowledgeBaseName || existingItems[0]?.knowledgeBaseName || undefined;
 
-    const lines = textContent.split('\n');
-    let currentSection = 'Geral';
-    let currentTitle = '';
-    let currentContent = '';
-    let hasStructuredItems = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const itemsToSave: any[] = [];
+    const itemsToSave = parseTxtToItems(textContent, {
+      module: moduleName,
+      source: 'manual',
+      knowledgeBaseId,
+      knowledgeBaseName,
+      createdAt,
+      updatedAt,
+    });
 
-    function flushItem() {
-      if (currentTitle.trim() || currentContent.trim()) {
-        itemsToSave.push({
-          id: newId(),
-          module: moduleName,
-          section: currentSection,
-          title: currentTitle.trim() || 'Tópico',
-          content: currentContent.trim(),
-          source: 'manual',
-          knowledgeBaseId,
-          knowledgeBaseName,
-          createdAt,
-          updatedAt
-        });
-        currentTitle = '';
-        currentContent = '';
-      }
-    }
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-         if (currentContent) currentContent += '\n';
-         continue;
-      }
-      if (trimmed.toLowerCase().startsWith('módulo ') || trimmed.toLowerCase().startsWith('modulo ')) {
-        flushItem();
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-      if (trimmed.startsWith('## ') || trimmed.startsWith('### ')) {
-        flushItem();
-        currentSection = trimmed.replace(/^#+\s*/, '');
-        continue;
-      }
-      if (trimmed.startsWith('*')) {
-        hasStructuredItems = true;
-        flushItem();
-        const itemText = trimmed.substring(1).trim();
-        const colonIndex = itemText.indexOf(':');
-
-        if (colonIndex !== -1 && colonIndex < 120) {
-          currentTitle = itemText.substring(0, colonIndex).trim();
-          currentContent = itemText.substring(colonIndex + 1).trim() + '\n';
-        } else {
-          currentTitle = 'Instrução';
-          currentContent = itemText + '\n';
-        }
-        continue;
-      }
-      currentContent += trimmed + '\n';
-    }
-    flushItem();
-
-    if (!hasStructuredItems && itemsToSave.length === 1) {
-      itemsToSave[0].section = 'Documentação Técnica / Especificação';
-      itemsToSave[0].title = 'Estrutura Completa de Dados';
-      itemsToSave[0].source = 'manual_raw';
-    }
+    await saveBackupIfChanged(db, moduleName, buildTxtFromItems(existingItems), buildTxtFromItems(itemsToSave), 'edit');
 
     if (previousKbId && previousKbId !== knowledgeBaseId) {
       try {
@@ -333,7 +386,14 @@ router.get('/export-txt', async (req: Request, res: Response) => {
     if (moduleName) filter.module = moduleName;
 
     const db = await getDb();
-    const items = await db.collection('knowledge').find(filter).sort({ section: 1, createdAt: 1 }).toArray();
+    const allItems = await db.collection('knowledge').find(filter).toArray();
+    // Agrupa por módulo mantendo a ordem interna de cada um.
+    const items = moduleName
+      ? sortModuleItems(allItems)
+      : Object.values(allItems.reduce<Record<string, KnowledgeDoc[]>>((acc, it) => {
+          (acc[it.module] ||= []).push(it);
+          return acc;
+        }, {})).flatMap(sortModuleItems);
 
     if (items.length === 0) return res.status(404).json({ error: 'Nenhum dado encontrado.' });
 
