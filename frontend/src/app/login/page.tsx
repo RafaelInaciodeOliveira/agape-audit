@@ -36,7 +36,9 @@ export default function LoginPage() {
       router.replace('/');
     } catch (error) {
       const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-      if (status === 401 || status === 400) toast.error('Usuário ou senha incorretos.');
+      const serverMessage = axios.isAxiosError(error) ? (error.response?.data as { error?: string } | undefined)?.error : undefined;
+      if (status === 429) toast.error(serverMessage || 'Muitas tentativas de login. Tente novamente mais tarde.', { id: 'login-rate-limit' });
+      else if (status === 401 || status === 400) toast.error('Usuário ou senha incorretos.');
       else if (status === 500) toast.error('Login não configurado no servidor. Verifique o backend/.env.');
       else toast.error('Erro ao conectar com o servidor.');
       setIsLoading(false);

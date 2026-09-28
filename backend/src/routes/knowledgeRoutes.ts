@@ -2,9 +2,18 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { MongoClient, Db } from 'mongodb';
 import { UmblerService } from '../services/umbler.js';
+import { logError } from '../utils/logger.js';
+import {
+  idSchema, moduleNameSchema, paramValidator, parseInput, syncUmblerBodySchema, uploadBodySchema,
+  updateModuleBodySchema, exportQuerySchema, backupsQuerySchema,
+} from '../validation/schemas.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+// Limite de 5 MB por arquivo, na memória: evita esgotar a RAM com uploads gigantes.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+
+router.param('moduleName', paramValidator(moduleNameSchema));
+router.param('id', paramValidator(idSchema));
 
 let dbInstance: Db | null = null;
 async function getDb(): Promise<Db> {
@@ -15,7 +24,7 @@ async function getDb(): Promise<Db> {
   Promise.all([
     dbInstance.collection('knowledgeBackups').createIndex({ module: 1, createdAt: -1, id: -1 }),
     dbInstance.collection('knowledgeBackups').createIndex({ id: 1 }),
-  ]).catch((err) => console.error('Erro ao criar índices de knowledgeBackups:', err.message));
+  ]).catch((err) => logError('Índices knowledgeBackups', err));
   return dbInstance;
 }
 
@@ -170,7 +179,8 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
     const bases = await UmblerService.listKnowledgeBases();
     res.json(bases);
   } catch (error: any) {
-    res.status(500).json({ error: error.response?.data || error.message });
+    logError('Umbler listKnowledgeBases', error);
+    res.status(500).json({ error: 'Erro ao listar as bases de conhecimento da Umbler.' });
   }
 });
 
@@ -179,9 +189,11 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
 router.get('/module/:moduleName/backups', async (req: Request, res: Response) => {
   try {
     const db = await getDb();
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 20, 1), 100);
-    const cursorCreatedAt = typeof req.query.beforeCreatedAt === 'string' ? req.query.beforeCreatedAt : null;
-    const cursorId = typeof req.query.beforeId === 'string' ? req.query.beforeId : '';
+    const query = parseInput(backupsQuerySchema, req.query, res);
+    if (!query) return;
+    const limit = query.limit ?? 20;
+    const cursorCreatedAt = query.beforeCreatedAt ?? null;
+    const cursorId = query.beforeId ?? '';
 
     const match: Record<string, unknown> = { module: req.params.moduleName };
     if (cursorCreatedAt) {
@@ -254,8 +266,9 @@ router.delete('/backups/:id', async (req: Request, res: Response) => {
 
 router.post('/sync-umbler', async (req: Request, res: Response) => {
   try {
-    const { moduleName, knowledgeBaseId } = req.body;
-    if (!moduleName) return res.status(400).json({ error: 'Nome do módulo ausente.' });
+    const input = parseInput(syncUmblerBodySchema, req.body, res);
+    if (!input) return;
+    const { moduleName, knowledgeBaseId } = input;
 
     const db = await getDb();
     const items = await loadModuleItems(db, moduleName);
@@ -267,7 +280,7 @@ router.post('/sync-umbler', async (req: Request, res: Response) => {
 
     return res.json({ success: true });
   } catch (error: any) {
-    console.error(`Erro ao sincronizar "${req.body.moduleName}":`, error.response?.data || error.message);
+    logError('Umbler syncKnowledgeDocument', error);
     if (error.response && error.response.status === 404) {
        return res.status(404).json({ error: 'Nenhuma alteração nova para enviar.' });
     }
@@ -279,17 +292,20 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
-    const knowledgeBaseId = req.body.knowledgeBaseId || undefined;
-    const knowledgeBaseName = req.body.knowledgeBaseName || undefined;
+    const input = parseInput(uploadBodySchema, req.body, res);
+    if (!input) return;
+    const { knowledgeBaseId, knowledgeBaseName } = input;
 
     let originalName = req.file.originalname;
     try {
       originalName = Buffer.from(originalName, 'latin1').toString('utf8');
     } catch (e) {
-      console.log('Erro ao converter nome do arquivo', e);
+      logError('Upload: conversão do nome do arquivo', e);
     }
 
-    const currentModule = originalName.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral';
+    const parsedModule = moduleNameSchema.safeParse(originalName.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral');
+    if (!parsedModule.success) return res.status(400).json({ error: 'Nome de arquivo inválido para um módulo.' });
+    const currentModule = parsedModule.data;
 
     let textContent = req.file.buffer.toString('utf-8');
     if (textContent.charCodeAt(0) === 0xFEFF) {
@@ -314,7 +330,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
       try {
         await UmblerService.deleteKnowledgeDocument(`${currentModule}.txt`, previousKbId);
       } catch (error: any) {
-        console.error(`Erro ao remover "${currentModule}" da base antiga:`, error.response?.data || error.message);
+        logError(`Umbler remover "${currentModule}" da base antiga`, error);
       }
     }
 
@@ -333,9 +349,9 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 router.put('/module/:moduleName', async (req: Request, res: Response) => {
   try {
     const { moduleName } = req.params;
-    const { textContent } = req.body;
-
-    if (!textContent) return res.status(400).json({ error: 'Conteúdo vazio.' });
+    const input = parseInput(updateModuleBodySchema, req.body, res);
+    if (!input) return;
+    const { textContent } = input;
 
     const db = await getDb();
     
@@ -345,8 +361,8 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
     const updatedAt = new Date().toISOString();
 
     const previousKbId = existingItems[0]?.knowledgeBaseId;
-    const knowledgeBaseId = req.body.knowledgeBaseId || previousKbId || undefined;
-    const knowledgeBaseName = req.body.knowledgeBaseName || existingItems[0]?.knowledgeBaseName || undefined;
+    const knowledgeBaseId = input.knowledgeBaseId || previousKbId || undefined;
+    const knowledgeBaseName = input.knowledgeBaseName || existingItems[0]?.knowledgeBaseName || undefined;
 
     const itemsToSave = parseTxtToItems(textContent, {
       module: moduleName,
@@ -363,7 +379,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
       try {
         await UmblerService.deleteKnowledgeDocument(`${moduleName}.txt`, previousKbId);
       } catch (error: any) {
-        console.error(`Erro ao remover "${moduleName}" da base antiga:`, error.response?.data || error.message);
+        logError(`Umbler remover "${moduleName}" da base antiga`, error);
       }
     }
 
@@ -381,8 +397,10 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
 router.get('/export-txt', async (req: Request, res: Response) => {
   try {
-    const moduleName = req.query.moduleName ? String(req.query.moduleName) : null;
-    const filter: any = {};
+    const query = parseInput(exportQuerySchema, req.query, res);
+    if (!query) return;
+    const moduleName = query.moduleName ?? null;
+    const filter: Record<string, string> = {};
     if (moduleName) filter.module = moduleName;
 
     const db = await getDb();
@@ -425,7 +443,7 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
       await UmblerService.deleteKnowledgeDocument(`${req.params.moduleName}.txt`, knowledgeBaseId);
       umblerSynced = true;
     } catch (error: any) {
-      console.error(`Erro ao remover "${req.params.moduleName}" da Umbler:`, error.response?.data || error.message);
+      logError(`Umbler remover "${req.params.moduleName}"`, error);
     }
 
     return res.json({ success: true, umblerSynced });

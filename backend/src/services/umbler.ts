@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { logError } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -23,7 +24,7 @@ export const UmblerService = {
       });
       return response.data || [];
     } catch (e) {
-      console.error('Erro ao buscar tags no Umbler:', e.message);
+      logError('Umbler getTags', e);
       return [];
     }
   },
@@ -65,76 +66,35 @@ export const UmblerService = {
       }
       return { items: [], total: 0 };
     } catch (e) {
-      console.error('Erro ao buscar chats no Umbler:', e.response?.data || e.message);
+      logError('Umbler getChats', e);
       return { items: [], total: 0 };
     }
   },
 
   getChatMessages: async (chatId: string) => {
-  const organizationId = process.env.UMBLER_ORGANIZATION_ID;
+    try {
+      const response = await umblerApi.get(`/v1/chats/${encodeURIComponent(chatId)}/relative-messages/`, {
+        params: {
+          organizationId,
+          FromEventUTC: new Date().toISOString(),
+          Take: 250,
+          Direction: 'TakeBefore',
+          IncludeMetadata: false,
+        },
+      });
 
-  try {
-    const url = `/v1/chats/${chatId}/relative-messages/`;
-
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🔎 BUSCANDO HISTÓRICO UMBLER');
-    console.log('Chat ID:', chatId);
-    console.log('Organization ID:', organizationId);
-    console.log('URL:', url);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-    const response = await umblerApi.get(url, {
-      params: {
-        organizationId,
-        FromEventUTC: new Date().toISOString(),
-        Take: 250,
-        Direction: 'TakeBefore',
-        IncludeMetadata: false,
-      }
-    });
-
-    console.log('✅ STATUS UMBLER:', response.status);
-    console.log('📦 HEADERS UMBLER:', response.headers);
-    console.log('📨 RESPOSTA COMPLETA UMBLER:');
-    console.dir(response.data, { depth: null });
-
-    const msgs =
-      response.data?.messages ??
-      response.data?.items ??
-      response.data?.data ??
-      response.data;
-
-    console.log('🎯 MENSAGENS EXTRAÍDAS:');
-    console.dir(msgs, { depth: null });
-
-    if (Array.isArray(msgs)) {
-      console.log(`✅ ${msgs.length} mensagens encontradas`);
-      return msgs;
+      const msgs = response.data?.messages ?? response.data?.items ?? response.data?.data ?? response.data;
+      return Array.isArray(msgs) ? msgs : [];
+    } catch (e) {
+      logError('Umbler getChatMessages', e);
+      return [];
     }
-
-    console.warn('⚠️ Resposta não contém um array de mensagens');
-
-    return [];
-
-  } catch (e: any) {
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.error('❌ ERRO REAL DA UMBLER');
-    console.error('Status:', e.response?.status);
-    console.error('Status Text:', e.response?.statusText);
-    console.error('URL:', e.config?.url);
-    console.error('Params:', e.config?.params);
-    console.error('Resposta:', e.response?.data);
-    console.error('Mensagem:', e.message);
-    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-    return [];
-  }
-},
+  },
 
   // Busca as últimas mensagens de um chat sem logs, com metadados de cobrança (message.billable).
   // Usado pela sincronização de custos de IA, que percorre muitos chats de uma vez.
   getChatMessagesWithBilling: async (chatId: string, take = 250): Promise<any[]> => {
-    const response = await umblerApi.get(`/v1/chats/${chatId}/relative-messages/`, {
+    const response = await umblerApi.get(`/v1/chats/${encodeURIComponent(chatId)}/relative-messages/`, {
       params: {
         organizationId,
         FromEventUTC: new Date().toISOString(),
@@ -151,12 +111,12 @@ export const UmblerService = {
   createKnowledgeBaseQA: async (question: string, answer: string) => {
     const kbId = process.env.UMBLER_KB_ID;
 
-    const qaResponse = await umblerApi.post(`/v1/knowledge-bases/${kbId}/qa/`, {
+    const qaResponse = await umblerApi.post(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/qa/`, {
       question,
       answer,
     });
 
-    await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`);
+    await umblerApi.post(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/ingest/`);
     return qaResponse.data;
   },
 
@@ -175,14 +135,14 @@ export const UmblerService = {
     kbId = kbId || process.env.UMBLER_KB_ID;
     const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
 
-    const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {
+    const listResp = await umblerApi.get(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/documents/`, {
       params: { organizationId },
     });
     const existing = (listResp.data?.items || []).find(
       (d: any) => (d.fileName || '').replace(/^\.\//, '').trim().toLowerCase() === targetName
     );
     if (existing) {
-      await umblerApi.delete(`/v1/knowledge-bases/${kbId}/documents/${existing.id}/`, {
+      await umblerApi.delete(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(existing.id)}/`, {
         params: { organizationId },
       });
     }
@@ -190,14 +150,14 @@ export const UmblerService = {
     const form = new FormData();
     const blob = new Blob([content], { type: 'text/plain' });
     form.append('Document', blob, fileName);
-    await umblerApi.post(`/v1/knowledge-bases/${kbId}/documents/`, form, {
+    await umblerApi.post(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/documents/`, form, {
       params: { organizationId },
       // A instância tem Content-Type: application/json fixo por padrão; precisa
       // ser removido aqui pra o axios detectar o FormData e montar o multipart certo.
       headers: { 'Content-Type': undefined },
     });
 
-    await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`, {}, { params: { organizationId } });
+    await umblerApi.post(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/ingest/`, {}, { params: { organizationId } });
   },
 
   // Remove da Umbler o documento correspondente a um arquivo apagado localmente
@@ -206,17 +166,17 @@ export const UmblerService = {
     kbId = kbId || process.env.UMBLER_KB_ID;
     const targetName = fileName.replace(/^\.\//, '').trim().toLowerCase();
 
-    const listResp = await umblerApi.get(`/v1/knowledge-bases/${kbId}/documents/`, {
+    const listResp = await umblerApi.get(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/documents/`, {
       params: { organizationId },
     });
     const existing = (listResp.data?.items || []).find(
       (d: any) => (d.fileName || '').replace(/^\.\//, '').trim().toLowerCase() === targetName
     );
     if (existing) {
-      await umblerApi.delete(`/v1/knowledge-bases/${kbId}/documents/${existing.id}/`, {
+      await umblerApi.delete(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(existing.id)}/`, {
         params: { organizationId },
       });
-      await umblerApi.post(`/v1/knowledge-bases/${kbId}/ingest/`, {}, { params: { organizationId } });
+      await umblerApi.post(`/v1/knowledge-bases/${encodeURIComponent(kbId)}/ingest/`, {}, { params: { organizationId } });
     }
   },
 };

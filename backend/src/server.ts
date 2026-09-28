@@ -8,11 +8,20 @@ import knowledgeRoutes from './routes/knowledgeRoutes.js';
 import finopsRoutes from './routes/finopsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import { authMiddleware } from './middlewares/authMiddleware.js';
+import { logError } from './utils/logger.js';
+import {
+  idSchema, paramValidator, parseInput, chatsQuerySchema, chatAuditBodySchema,
+  messageAuditBodySchema, nameBodySchema, reportQuerySchema,
+} from './validation/schemas.js';
 import { syncAiUsageFromUmbler } from './services/aiUsageSync.js';
 
 dotenv.config();
 
 const app = express();
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(hops) ? hops : process.env.TRUST_PROXY);
+}
 
 // Só o frontend configurado pode chamar a API pelo navegador. FRONTEND_URL aceita
 // várias origens separadas por vírgula. Requisições sem Origin (servidor a servidor,
@@ -36,7 +45,7 @@ if (mongoUri) {
       console.log('🍃 Mongoose conectado com sucesso ao MongoDB Atlas!');
       scheduleAiUsageSync();
     })
-    .catch((err) => console.error('❌ Erro ao conectar Mongoose:', err));
+    .catch((err) => logError('Mongoose connect', err));
 }
 
 // Importa periodicamente da Umbler o consumo (créditos) das respostas do Ágape para o painel de Custos de IA
@@ -44,7 +53,7 @@ function scheduleAiUsageSync() {
   if (!process.env.UMBLER_TOKEN) return;
   const minutes = Number(process.env.FINOPS_SYNC_INTERVAL_MIN || 15);
   if (!Number.isFinite(minutes) || minutes <= 0) return;
-  const run = () => syncAiUsageFromUmbler().catch((err) => console.error('[FinOps] Falha no sync automático:', err.message));
+  const run = () => syncAiUsageFromUmbler().catch((err) => logError('FinOps sync automático', err));
   setTimeout(run, 10_000);
   setInterval(run, minutes * 60_000);
 }
@@ -112,7 +121,7 @@ async function initDb() {
     }
   }
 }
-initDb().catch((err) => console.error('Erro ao inicializar o MongoDB:', err.message));
+initDb().catch((err) => logError('initDb', err));
 
 const CARTEIRAS = ['ANTARES', 'ARCTURUS', 'ALPHA', 'SIGMA', 'SIRIUS'];
 const AGAPE_MEMBER_ID = 'afDzOd4PFUB3xLbX';
@@ -131,9 +140,14 @@ const KNOWN_ATTENDANTS = [
   { id: 'acpzV_4hy6-atHJl', name: 'Ana Carolina' },
 ];
 
+app.param('id', paramValidator(idSchema));
+app.param('topicId', paramValidator(idSchema));
+
 app.get('/api/chats', async (req, res) => {
   try {
-    const { carteira, search, attendantId, status } = req.query;
+    const query = parseInput(chatsQuerySchema, req.query, res);
+    if (!query) return;
+    const { carteira, search, attendantId, status } = query;
     const db = await getDb();
     
     const hiddenChatsList = await db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray();
@@ -143,7 +157,7 @@ app.get('/api/chats', async (req, res) => {
     const messageAuditsList = await db.collection('messageAudits').find({}, { projection: { chatId: 1 } }).toArray();
     const chatsWithMessageAudits = new Set(messageAuditsList.map((a: any) => a.chatId));
 
-    const targetStatus = status ? String(status).toLowerCase() : 'finalizados';
+    const targetStatus = status ?? 'finalizados';
     let chatsToProcess: any[] = [];
 
     if (targetStatus === 'ocultos') {
@@ -169,18 +183,6 @@ app.get('/api/chats', async (req, res) => {
       ) || 'ANTARES';
 
       const lastMsgFromChat = chat.lastMessage;
-
-      // DEBUG TEMPORÁRIO: remover depois de confirmar o formato do organizationMemberHistory.
-      if (chat.organizationMember?.id === 'ZuSZiD4N-bRbWZZf') {
-        console.log('\n=== DEBUG chat Brenda ===', chat.id, chat.contact?.name);
-        console.dir({
-          organizationMember: chat.organizationMember,
-          lastOrganizationMember: chat.lastOrganizationMember,
-          organizationMembers: chat.organizationMembers,
-          organizationMemberHistory: chat.organizationMemberHistory,
-          lastMessage: chat.lastMessage,
-        }, { depth: null });
-      }
 
       const chatMembers = [
         ...(chat.organizationMembers || []),
@@ -235,13 +237,13 @@ app.get('/api/chats', async (req, res) => {
     });
 
     if (attendantId && attendantId !== 'TODOS') {
-      chats = chats.filter((c: any) => c.effectiveOwnerId === String(attendantId));
+      chats = chats.filter((c: any) => c.effectiveOwnerId === attendantId);
     }
     if (carteira && carteira !== 'TODAS') {
-      chats = chats.filter((c: any) => c.carteiraTag.toUpperCase().includes(String(carteira).toUpperCase()));
+      chats = chats.filter((c: any) => c.carteiraTag.toUpperCase().includes(carteira.toUpperCase()));
     }
     if (search) {
-      const term = String(search).toLowerCase();
+      const term = search.toLowerCase();
       chats = chats.filter((c: any) =>
         c.contactName.toLowerCase().includes(term) ||
         JSON.stringify(c.lastMessage).toLowerCase().includes(term) ||
@@ -283,7 +285,9 @@ app.get('/api/chats/:id/messages', async (req, res) => {
 
 app.post('/api/audits', async (req, res) => {
   try {
-    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = req.body;
+    const input = parseInput(chatAuditBodySchema, req.body, res);
+    if (!input) return;
+    const { chatId, clientName, carteiraTag, rating, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, auditorEmail, topicId, subtopicId } = input;
     const db = await getDb();
     
     let isViolated = violatedPromptRules ? 1 : 0;
@@ -332,7 +336,9 @@ app.get('/api/fail-reasons', async (_req, res) => {
 
 app.post('/api/fail-reasons', async (req, res) => {
   try {
-    const { name } = req.body;
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
+    const { name } = body;
     const db = await getDb();
     const id = newId();
     await db.collection('failReasons').insertOne({ id, name, createdAt: new Date().toISOString() });
@@ -343,7 +349,9 @@ app.post('/api/fail-reasons', async (req, res) => {
 app.put('/api/fail-reasons/:id', async (req, res) => {
   try {
     const db = await getDb();
-    await db.collection('failReasons').updateOne({ id: req.params.id }, { $set: { name: req.body.name } });
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
+    await db.collection('failReasons').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
@@ -368,7 +376,9 @@ app.get('/api/topics', async (_req, res) => {
 
 app.post('/api/topics', async (req, res) => {
   try {
-    const { name } = req.body;
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
+    const { name } = body;
     const db = await getDb();
     const id = newId();
     await db.collection('topics').insertOne({ id, name, createdAt: new Date().toISOString() });
@@ -379,7 +389,9 @@ app.post('/api/topics', async (req, res) => {
 app.put('/api/topics/:id', async (req, res) => {
   try {
     const db = await getDb();
-    await db.collection('topics').updateOne({ id: req.params.id }, { $set: { name: req.body.name } });
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
+    await db.collection('topics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
@@ -396,16 +408,20 @@ app.delete('/api/topics/:id', async (req, res) => {
 app.post('/api/topics/:topicId/subtopics', async (req, res) => {
   try {
     const db = await getDb();
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
     const id = newId();
-    await db.collection('subtopics').insertOne({ id, topicId: req.params.topicId, name: req.body.name, createdAt: new Date().toISOString() });
-    res.json({ id, topicId: req.params.topicId, name: req.body.name });
+    await db.collection('subtopics').insertOne({ id, topicId: req.params.topicId, name: body.name, createdAt: new Date().toISOString() });
+    res.json({ id, topicId: req.params.topicId, name: body.name });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 
 app.put('/api/subtopics/:id', async (req, res) => {
   try {
     const db = await getDb();
-    await db.collection('subtopics').updateOne({ id: req.params.id }, { $set: { name: req.body.name } });
+    const body = parseInput(nameBodySchema, req.body, res);
+    if (!body) return;
+    await db.collection('subtopics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
@@ -430,7 +446,9 @@ app.get('/api/chats/:id/message-audits', async (req, res) => {
 
 app.post('/api/message-audits', async (req, res) => {
   try {
-    const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = req.body;
+    const input = parseInput(messageAuditBodySchema, req.body, res);
+    if (!input) return;
+    const { chatId, messageId, clientQuestion, topicId, subtopicId, failReasons, violatedPromptRules, knowledgeBaseFail, auditorFeedback, trainAi, targetModule, qaQuestion, qaAnswer, auditorEmail } = input;
     
     const db = await getDb();
     
@@ -485,7 +503,9 @@ app.post('/api/message-audits', async (req, res) => {
 
 app.get('/api/reports/themes', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const query = parseInput(reportQuerySchema, req.query, res);
+    if (!query) return;
+    const { startDate, endDate } = query;
     let dateFilter: any = {};
     if (startDate && endDate) {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
@@ -527,7 +547,9 @@ app.get('/api/reports/themes', async (req, res) => {
 
 app.get('/api/reports/quality', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const query = parseInput(reportQuerySchema, req.query, res);
+    if (!query) return;
+    const { startDate, endDate } = query;
     let dateFilter: any = {};
     if (startDate && endDate) {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
@@ -598,7 +620,9 @@ app.get('/api/reports/quality', async (req, res) => {
 
 app.get('/api/reports/value', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const query = parseInput(reportQuerySchema, req.query, res);
+    if (!query) return;
+    const { startDate, endDate } = query;
     let dateFilter: any = {};
     if (startDate && endDate) {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
@@ -644,7 +668,9 @@ function toCsvCell(value: any): string {
 // NOVA LÓGICA: Uma linha por Chat, colunas dinâmicas para as mensagens auditadas
 app.get('/api/reports/export', async (req, res) => {
   try {
-    const { startDate, endDate, reasonId } = req.query;
+    const query = parseInput(reportQuerySchema, req.query, res);
+    if (!query) return;
+    const { startDate, endDate, reasonId } = query;
     let dateFilter: any = {};
     if (startDate && endDate) {
       dateFilter = { createdAt: { $gte: `${startDate}T00:00:00.000Z`, $lte: `${endDate}T23:59:59.999Z` } };
@@ -837,10 +863,6 @@ function strapiToText(value: any): string {
 }
 
 app.post('/api/webhooks/strapi', async (req, res) => {
-  console.log('=== NOVO EVENTO STRAPI ===');
-  console.log('Headers:', JSON.stringify({ 'content-type': req.headers['content-type'], 'user-agent': req.headers['user-agent'] }));
-  console.log(JSON.stringify(req.body, null, 2));
-
   // Proteção opcional: no painel do Strapi, adicione o header "Authorization: Bearer <STRAPI_WEBHOOK_SECRET>"
   const secret = process.env.STRAPI_WEBHOOK_SECRET;
   if (secret && req.headers.authorization !== `Bearer ${secret}`) {
@@ -869,8 +891,7 @@ app.post('/api/webhooks/strapi', async (req, res) => {
         const { deletedCount } = await db.collection('knowledge').deleteMany({ source: 'strapi_webhook', strapiKey });
         console.log(`[Strapi] ${event}: ${deletedCount} item(ns) removido(s) de Novidades Prover (${strapiKey}).`);
       } catch (dbError: any) {
-        console.error('[Strapi] Erro de banco ao remover novidade:', dbError.name, dbError.code, dbError.message);
-        console.error(dbError.stack);
+        logError('Strapi remover novidade', dbError);
         throw dbError;
       }
       return res.json({ success: true, message: 'Novidade removida da Base de Conhecimento.' });
@@ -930,13 +951,11 @@ app.post('/api/webhooks/strapi', async (req, res) => {
       console.log(`🚀 [Strapi] ${event}: novidade '${title}' ${action} em Novidades Prover (${strapiKey}).`);
       return res.json({ success: true, message: `Novidade ${action} na Base de Conhecimento!` });
     } catch (dbError: any) {
-      console.error('[Strapi] Erro de banco ao salvar novidade:', dbError.name, dbError.code, dbError.message);
-      console.error(dbError.stack);
+      logError('Strapi salvar novidade', dbError);
       throw dbError;
     }
   } catch (error: any) {
-    console.error('[Strapi] Erro no webhook:', error.message);
-    console.error(error.stack);
+    logError('Strapi webhook', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -990,6 +1009,16 @@ app.get('/api/dashboard', async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Erros não tratados nas rotas (upload grande demais, JSON malformado, etc.): responde
+// sem stack trace e registra só o erro técnico.
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Arquivo grande demais (máximo de 5 MB).' });
+  if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON inválido.' });
+  if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Corpo da requisição grande demais.' });
+  logError('Erro não tratado', err);
+  return res.status(500).json({ error: 'Erro interno do servidor.' });
 });
 
 const PORT = process.env.PORT || 3001;

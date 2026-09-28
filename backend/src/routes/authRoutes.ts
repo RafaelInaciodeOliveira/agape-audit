@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { createHash, timingSafeEqual } from 'crypto';
 import { signAuthToken, getJwtSecret } from '../middlewares/authMiddleware.js';
+import { loginRateLimiter } from '../middlewares/rateLimit.js';
+import { loginBodySchema, parseInput } from '../validation/schemas.js';
 
 const router = Router();
 
@@ -11,8 +13,7 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
-router.post('/login', (req: Request, res: Response) => {
-  const { username, password } = req.body ?? {};
+router.post('/login', loginRateLimiter, (req: Request, res: Response) => {
   const envUser = process.env.ADMIN_USER;
   const envPass = process.env.ADMIN_PASS;
 
@@ -21,9 +22,9 @@ router.post('/login', (req: Request, res: Response) => {
     return res.status(500).json({ error: 'Login não configurado no servidor.' });
   }
 
-  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
-    return res.status(400).json({ error: 'Usuário e senha são obrigatórios.' });
-  }
+  const input = parseInput(loginBodySchema, req.body, res);
+  if (!input) return;
+  const { username, password } = input;
 
   // Avalia os dois lados sempre, para não revelar pelo tempo qual campo errou.
   const userOk = safeEqual(username, envUser);
