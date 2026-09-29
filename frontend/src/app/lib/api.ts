@@ -44,6 +44,24 @@ if (typeof window !== 'undefined' && !globalFlags[INSTALLED]) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const fetcher = (url: string): Promise<any> => axios.get(url).then(res => res.data);
 
+/**
+ * Mensagem amigável para um erro de requisição. O backend só devolve mensagens seguras
+ * (validação, "Umbler indisponível", etc.); erros 500 viram o texto de `fallback`.
+ */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback;
+  if (!error.response) return 'Sem conexão com o servidor. Verifique sua internet e tente novamente.';
+  const { status, data } = error.response;
+  const message = typeof (data as { error?: unknown })?.error === 'string' ? (data as { error: string }).error : null;
+  if (message && (status < 500 || status === 502)) return message;
+  return fallback;
+}
+
+/** true quando o erro veio de falha/timeout da Umbler (HTTP 502 do backend). */
+export function isUmblerUnavailable(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 502;
+}
+
 function filenameFromDisposition(header?: string | null): string | null {
   if (!header) return null;
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);

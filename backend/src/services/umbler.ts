@@ -1,6 +1,7 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { logError } from '../utils/logger.js';
+import { UmblerError } from '../utils/httpErrors.js';
 
 dotenv.config();
 
@@ -10,11 +11,20 @@ const organizationId = process.env.UMBLER_ORGANIZATION_ID;
 const umblerApi = axios.create({
   // Sobrescrevível para homologação/testes com uma API simulada.
   baseURL: process.env.UMBLER_API_URL || 'https://app-utalk.umbler.com/api',
+  // Sem timeout, uma Umbler travada deixaria a requisição do auditor pendurada para sempre.
+  timeout: Number(process.env.UMBLER_TIMEOUT_MS) > 0 ? Number(process.env.UMBLER_TIMEOUT_MS) : 20_000,
   headers: {
     Authorization: `Bearer ${rawToken}`,
     'Content-Type': 'application/json',
   },
 });
+
+// Toda falha da Umbler vira UmblerError: as rotas respondem 502 e o log não carrega
+// headers (token) nem parâmetros.
+umblerApi.interceptors.response.use(
+  (response) => response,
+  (error) => Promise.reject(UmblerError.fromAxios(error))
+);
 
 // ---------- Paginação ----------
 // Lista de chats: offset (Skip/Take) com `page.totalItems`/`page.maxTake` na resposta.
@@ -177,26 +187,16 @@ export const UmblerService = {
   // chatState: 'Open' | 'Closed' | 'All'. memberId: filtra só chats desse membro (ex: o Ágape).
   // Em caso de erro lança exceção: devolver uma lista parcial esconderia chats sem aviso.
   getChats: async (opts: GetChatsOptions = {}): Promise<ChatsResult> => {
-    try {
-      const result = await fetchAllChats(opts);
-      if (result.truncated) {
-        console.warn(`[Umbler] getChats(${opts.chatState ?? 'All'}): ${result.total} chats, limitado a ${result.items.length} (UMBLER_MAX_CHATS).`);
-      }
-      return result;
-    } catch (e) {
-      logError('Umbler getChats', e);
-      throw e;
+    const result = await fetchAllChats(opts);
+    if (result.truncated) {
+      console.warn(`[Umbler] getChats(${opts.chatState ?? 'All'}): ${result.total} chats, limitado a ${result.items.length} (UMBLER_MAX_CHATS).`);
     }
+    return result;
   },
 
-  getChatMessages: async (chatId: string) => {
-    try {
-      return await fetchChatMessages(chatId, { includeMetadata: false });
-    } catch (e) {
-      logError('Umbler getChatMessages', e);
-      return [];
-    }
-  },
+  // Em caso de falha lança UmblerError (a rota responde 502); antes devolvia [] e a tela
+  // mostrava "nenhuma mensagem" num chat que tem histórico.
+  getChatMessages: async (chatId: string) => fetchChatMessages(chatId, { includeMetadata: false }),
 
   // Mensagens com metadados de cobrança (message.billable), usado pelo sync de custos de IA.
   // `since` (ms) interrompe a paginação ao chegar em mensagens já sincronizadas.

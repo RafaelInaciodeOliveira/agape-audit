@@ -10,7 +10,7 @@ import {
   FileText, FolderDown, Sparkles, Database, Trash2, Pencil, X, Save, AlertTriangle, LayoutGrid, List, Calendar, RefreshCw, Search, History, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { API_URL, fetcher, downloadFile } from '../lib/api';
+import { API_URL, apiErrorMessage, fetcher, downloadFile } from '../lib/api';
 import BackupHistoryModal from './BackupHistoryModal';
 
 
@@ -149,10 +149,11 @@ export default function BaseConhecimentoPage() {
       });
       toast.success('Enviado e sincronizado com sucesso!', { id: toastId });
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
+      const message = apiErrorMessage(error, 'Erro ao enviar para a Umbler. Tente novamente.');
+      if (axios.isAxiosError(error) && error.response?.status === 404 && message.startsWith('Nenhuma alteração')) {
         toast.info('Tudo certo! O arquivo já está atualizado na Umbler.', { id: toastId });
       } else {
-        toast.error('Erro ao enviar. Verifique os logs do servidor.', { id: toastId });
+        toast.error(message, { id: toastId });
       }
     } finally {
       setSyncingModule(null);
@@ -179,10 +180,11 @@ export default function BaseConhecimentoPage() {
         const generatedModuleName = file.name.replace(/\.[^/.]+$/, "").trim() || 'Módulo Geral';
         handleSyncWithUmbler(generatedModuleName, currentUploadKbId);
       }
-    } catch {
-      toast.error('Erro ao importar arquivo.');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Erro ao importar arquivo.'));
     } finally {
       setUploading(false);
+      e.target.value = ''; // sem isso, escolher o mesmo arquivo de novo não dispara onChange
     }
   };
 
@@ -199,12 +201,16 @@ export default function BaseConhecimentoPage() {
     if (!moduleToDelete) return;
 
     try {
-      await axios.delete(`${API_URL}/knowledge/module/${encodeURIComponent(moduleToDelete)}`);
-      toast.success(`Módulo "${moduleToDelete}" excluído!`);
+      const res = await axios.delete<{ umblerSynced?: boolean }>(`${API_URL}/knowledge/module/${encodeURIComponent(moduleToDelete)}`);
+      if (res.data?.umblerSynced === false) {
+        toast.warning(`Módulo "${moduleToDelete}" excluído do sistema, mas não foi possível removê-lo da Umbler. Remova manualmente por lá.`);
+      } else {
+        toast.success(`Módulo "${moduleToDelete}" excluído!`);
+      }
       mutate(`${API_URL}/knowledge/modules`);
       mutate(`${API_URL}/knowledge`);
-    } catch {
-      toast.error('Erro ao excluir módulo.');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Erro ao excluir módulo.'));
     } finally {
       setModuleToDelete(null);
     }
@@ -217,8 +223,8 @@ export default function BaseConhecimentoPage() {
       setEditText(res.data.content);
       setEditKbId(moduleKbId(moduleName));
       setEditingModule(moduleName);
-    } catch {
-      toast.error('Erro ao carregar o conteúdo do módulo.');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Erro ao carregar o conteúdo do módulo.'));
     } finally {
       setOpeningEditor(null);
     }
@@ -244,8 +250,8 @@ export default function BaseConhecimentoPage() {
       if (autoSync) {
         handleSyncWithUmbler(currentModule, editKbId);
       }
-    } catch {
-      toast.error('Erro ao salvar alterações.');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Erro ao salvar alterações.'));
     } finally {
       setSavingEdit(false);
     }

@@ -3,6 +3,7 @@ import multer from 'multer';
 import { getDb, type Db } from '../config/db.js';
 import { UmblerService } from '../services/umbler.js';
 import { logError } from '../utils/logger.js';
+import { sendError, UmblerError } from '../utils/httpErrors.js';
 import {
   idSchema, moduleNameSchema, paramValidator, parseInput, syncUmblerBodySchema, uploadBodySchema,
   updateModuleBodySchema, exportQuerySchema, backupsQuerySchema,
@@ -251,8 +252,7 @@ router.get('/umbler-bases', async (_req: Request, res: Response) => {
     const bases = await UmblerService.listKnowledgeBases();
     res.json(bases);
   } catch (error: any) {
-    logError('Umbler listKnowledgeBases', error);
-    res.status(500).json({ error: 'Erro ao listar as bases de conhecimento da Umbler.' });
+    return sendError(res, error, 'GET /api/knowledge/umbler-bases');
   }
 });
 
@@ -298,7 +298,7 @@ router.get('/module/:moduleName/backups', async (req: Request, res: Response) =>
 
     return res.json({ items, nextCursor });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'GET /api/knowledge/module/:moduleName/backups');
   }
 });
 
@@ -310,7 +310,7 @@ router.get('/module/:moduleName/current-text', async (req: Request, res: Respons
     const items = await loadModuleItems(db, req.params.moduleName);
     return res.json({ content: buildTxtFromItems(items), itemCount: items.length });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'GET /api/knowledge/module/:moduleName/current-text');
   }
 });
 
@@ -321,7 +321,7 @@ router.get('/backups/:id', async (req: Request, res: Response) => {
     if (!backup) return res.status(404).json({ error: 'Backup não encontrado.' });
     return res.json(backup);
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'GET /api/knowledge/backups/:id');
   }
 });
 
@@ -332,7 +332,7 @@ router.delete('/backups/:id', async (req: Request, res: Response) => {
     if (!deletedCount) return res.status(404).json({ error: 'Backup não encontrado.' });
     return res.json({ success: true });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'DELETE /api/knowledge/backups/:id');
   }
 });
 
@@ -353,10 +353,10 @@ router.post('/sync-umbler', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (error: any) {
     logError('Umbler syncKnowledgeDocument', error);
-    if (error.response && error.response.status === 404) {
+    if (error instanceof UmblerError && error.status === 404) {
        return res.status(404).json({ error: 'Nenhuma alteração nova para enviar.' });
     }
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'POST /api/knowledge/sync-umbler');
   }
 });
 
@@ -415,7 +415,7 @@ router.post('/upload-txt', upload.single('file'), async (req: Request, res: Resp
 
     return res.status(200).json({ message: 'Base importada com sucesso!', totalItems: itemsToSave.length, umblerSynced: false });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Erro ao processar arquivo.' });
+    return sendError(res, error, 'POST /api/knowledge/upload-txt');
   }
 });
 
@@ -464,7 +464,7 @@ router.put('/module/:moduleName', async (req: Request, res: Response) => {
 
     return res.json({ success: true, totalItems: itemsToSave.length, umblerSynced: false });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'PUT /api/knowledge/module/:moduleName');
   }
 });
 
@@ -498,7 +498,7 @@ router.get('/export-txt', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.status(200).send(txtOutput.trim());
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Erro ao exportar arquivo.' });
+    return sendError(res, error, 'GET /api/knowledge/export-txt');
   }
 });
 
@@ -521,7 +521,7 @@ router.delete('/module/:moduleName', async (req: Request, res: Response) => {
 
     return res.json({ success: true, umblerSynced });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'DELETE /api/knowledge/module/:moduleName');
   }
 });
 
@@ -531,7 +531,7 @@ router.get('/modules', async (_req: Request, res: Response) => {
     const modules = await db.collection('knowledge').distinct('module');
     return res.json(modules);
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Erro ao buscar módulos.' });
+    return sendError(res, error, 'GET /api/knowledge/modules');
   }
 });
 
@@ -541,7 +541,7 @@ router.get('/', async (_req: Request, res: Response) => {
     const items = await db.collection('knowledge').find({}).sort({ module: 1, section: 1 }).toArray();
     return res.json(items);
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Erro ao buscar itens.' });
+    return sendError(res, error, 'GET /api/knowledge/');
   }
 });
 

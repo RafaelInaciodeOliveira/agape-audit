@@ -7,6 +7,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { AlertTriangle, ChevronsUpDown, Clock, FileText, History, RefreshCw, Trash2, X } from 'lucide-react';
 import { buildDiffRows, type DiffLineRow } from './diffRows';
+import { apiErrorMessage } from '../lib/api';
 
 const fetcher = (url: string) => axios.get(url).then(res => res.data);
 
@@ -151,8 +152,8 @@ export default function BackupHistoryModal({ apiUrl, moduleName, onClose, onRest
         prev => prev?.map(p => ({ ...p, items: p.items.filter(b => b.id !== confirmDeleteId) })),
         { revalidate: false }
       );
-    } catch {
-      toast.error('Erro ao apagar o backup.');
+    } catch (error) {
+      toast.error(apiErrorMessage(error, 'Erro ao apagar o backup.'));
     } finally {
       setDeleting(false);
       setConfirmDeleteId(null);

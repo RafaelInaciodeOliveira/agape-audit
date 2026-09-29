@@ -9,6 +9,7 @@ import finopsRoutes from './routes/finopsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import { authMiddleware } from './middlewares/authMiddleware.js';
 import { logError } from './utils/logger.js';
+import { sendError } from './utils/httpErrors.js';
 import {
   idSchema, paramValidator, parseInput, chatsQuerySchema, chatAuditBodySchema,
   messageAuditBodySchema, nameBodySchema, reportQuerySchema,
@@ -216,7 +217,7 @@ app.get('/api/chats', async (req, res) => {
     }
 
     res.json({ total: chats.length, items: chats, truncated });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/chats'); }
 });
 
 app.post('/api/chats/:id/hide', async (req, res) => {
@@ -228,7 +229,7 @@ app.post('/api/chats/:id/hide', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/chats/:id/hide'); }
 });
 
 app.post('/api/chats/:id/unhide', async (req, res) => {
@@ -236,7 +237,7 @@ app.post('/api/chats/:id/unhide', async (req, res) => {
     const db = getDb();
     await db.collection('hiddenChats').deleteOne({ chatId: req.params.id });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/chats/:id/unhide'); }
 });
 
 app.get('/api/chats/:id/messages', async (req, res) => {
@@ -244,7 +245,7 @@ app.get('/api/chats/:id/messages', async (req, res) => {
     const { id } = req.params;
     const messages = await UmblerService.getChatMessages(id);
     res.json(messages);
-  } catch { res.status(500).json({ error: 'Erro ao buscar mensagens do Umbler' }); }
+  } catch (error) { sendError(res, error, 'GET /api/chats/:id/messages'); }
 });
 
 app.post('/api/audits', async (req, res) => {
@@ -282,7 +283,7 @@ app.post('/api/audits', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/audits'); }
 });
 
 app.get('/api/config', async (_req, res) => {
@@ -294,8 +295,7 @@ app.get('/api/config', async (_req, res) => {
       defaultKnowledgeBaseId: process.env.UMBLER_KB_ID,
     });
   } catch (error) {
-    logError('GET /api/config', error);
-    res.status(500).json({ error: 'Erro ao carregar as configurações.' });
+    return sendError(res, error, 'GET /api/config');
   }
 });
 
@@ -304,7 +304,7 @@ app.get('/api/fail-reasons', async (_req, res) => {
     const db = getDb();
     const reasons = await db.collection('failReasons').find({}, { projection: { _id: 0 } }).sort({ createdAt: 1 }).toArray();
     res.json(reasons);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/fail-reasons'); }
 });
 
 app.post('/api/fail-reasons', async (req, res) => {
@@ -316,7 +316,7 @@ app.post('/api/fail-reasons', async (req, res) => {
     const id = newId();
     await db.collection('failReasons').insertOne({ id, name, createdAt: new Date().toISOString() });
     res.json({ id, name });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/fail-reasons'); }
 });
 
 app.put('/api/fail-reasons/:id', async (req, res) => {
@@ -326,7 +326,7 @@ app.put('/api/fail-reasons/:id', async (req, res) => {
     if (!body) return;
     await db.collection('failReasons').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'PUT /api/fail-reasons/:id'); }
 });
 
 app.delete('/api/fail-reasons/:id', async (req, res) => {
@@ -334,7 +334,7 @@ app.delete('/api/fail-reasons/:id', async (req, res) => {
     const db = getDb();
     await db.collection('failReasons').deleteOne({ id: req.params.id });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'DELETE /api/fail-reasons/:id'); }
 });
 
 app.get('/api/topics', async (_req, res) => {
@@ -344,7 +344,7 @@ app.get('/api/topics', async (_req, res) => {
     const subtopics = await db.collection('subtopics').find({}, { projection: { _id: 0 } }).sort({ name: 1 }).toArray();
     const result = topics.map((t: any) => ({ ...t, subtopics: subtopics.filter((s: any) => s.topicId === t.id) }));
     res.json(result);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/topics'); }
 });
 
 app.post('/api/topics', async (req, res) => {
@@ -356,7 +356,7 @@ app.post('/api/topics', async (req, res) => {
     const id = newId();
     await db.collection('topics').insertOne({ id, name, createdAt: new Date().toISOString() });
     res.json({ id, name, subtopics: [] });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/topics'); }
 });
 
 app.put('/api/topics/:id', async (req, res) => {
@@ -366,7 +366,7 @@ app.put('/api/topics/:id', async (req, res) => {
     if (!body) return;
     await db.collection('topics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'PUT /api/topics/:id'); }
 });
 
 app.delete('/api/topics/:id', async (req, res) => {
@@ -375,7 +375,7 @@ app.delete('/api/topics/:id', async (req, res) => {
     await db.collection('subtopics').deleteMany({ topicId: req.params.id });
     await db.collection('topics').deleteOne({ id: req.params.id });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'DELETE /api/topics/:id'); }
 });
 
 app.post('/api/topics/:topicId/subtopics', async (req, res) => {
@@ -386,7 +386,7 @@ app.post('/api/topics/:topicId/subtopics', async (req, res) => {
     const id = newId();
     await db.collection('subtopics').insertOne({ id, topicId: req.params.topicId, name: body.name, createdAt: new Date().toISOString() });
     res.json({ id, topicId: req.params.topicId, name: body.name });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/topics/:topicId/subtopics'); }
 });
 
 app.put('/api/subtopics/:id', async (req, res) => {
@@ -396,7 +396,7 @@ app.put('/api/subtopics/:id', async (req, res) => {
     if (!body) return;
     await db.collection('subtopics').updateOne({ id: req.params.id }, { $set: { name: body.name } });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'PUT /api/subtopics/:id'); }
 });
 
 app.delete('/api/subtopics/:id', async (req, res) => {
@@ -404,7 +404,7 @@ app.delete('/api/subtopics/:id', async (req, res) => {
     const db = getDb();
     await db.collection('subtopics').deleteOne({ id: req.params.id });
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'DELETE /api/subtopics/:id'); }
 });
 
 app.get('/api/chats/:id/message-audits', async (req, res) => {
@@ -414,7 +414,7 @@ app.get('/api/chats/:id/message-audits', async (req, res) => {
     const byMessageId: Record<string, any> = {};
     for (const a of audits) byMessageId[a.messageId] = a;
     res.json(byMessageId);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/chats/:id/message-audits'); }
 });
 
 app.post('/api/message-audits', async (req, res) => {
@@ -473,7 +473,7 @@ app.post('/api/message-audits', async (req, res) => {
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'POST /api/message-audits'); }
 });
 
 app.get('/api/reports/themes', async (req, res) => {
@@ -517,7 +517,7 @@ app.get('/api/reports/themes', async (req, res) => {
 
     const rows = Array.from(groups.values()).sort((a, b) => b.total - a.total);
     res.json(rows);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/reports/themes'); }
 });
 
 app.get('/api/reports/quality', async (req, res) => {
@@ -590,7 +590,7 @@ app.get('/api/reports/quality', async (req, res) => {
       .sort((a, b) => b.count - a.count);
 
     res.json({ totalAudited, violatedCount, kbFailCount, avgRating, byDay, byCarteira, reasonsDistribution });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/reports/quality'); }
 });
 
 app.get('/api/reports/value', async (req, res) => {
@@ -632,7 +632,7 @@ app.get('/api/reports/value', async (req, res) => {
       .sort((a, b) => a.day.localeCompare(b.day));
 
     res.json({ chatsAudited, qaGenerated, ratingDistribution, messagesAuditedByDay });
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/reports/value'); }
 });
 
 function toCsvCell(value: any): string {
@@ -803,7 +803,7 @@ app.get('/api/reports/export', async (req, res) => {
     const fileNameSuffix = reasonId ? `-filtro-falha` : '';
     res.setHeader('Content-Disposition', `attachment; filename="auditorias-agape${fileNameSuffix}-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(csv);
-  } catch (error: any) { res.status(500).json({ error: error.message }); }
+  } catch (error) { sendError(res, error, 'GET /api/reports/export'); }
 });
 
 // --- WEBHOOK DO STRAPI (Novidades Prover -> Base de Conhecimento) ---
@@ -930,8 +930,7 @@ app.post('/api/webhooks/strapi', async (req, res) => {
       throw dbError;
     }
   } catch (error: any) {
-    logError('Strapi webhook', error);
-    return res.status(500).json({ error: error.message });
+    return sendError(res, error, 'POST /api/webhooks/strapi');
   }
 });
 
@@ -973,7 +972,7 @@ app.get('/api/dashboard', async (req, res) => {
 
     res.json({ newStrapiRules, weeklyAvgRating, pendingChats, auditsThisWeek: ratings.length });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    return sendError(res, error, 'GET /api/dashboard');
   }
 });
 
@@ -983,8 +982,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   if (err?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Arquivo grande demais (máximo de 5 MB).' });
   if (err?.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON inválido.' });
   if (err?.type === 'entity.too.large') return res.status(413).json({ error: 'Corpo da requisição grande demais.' });
-  logError('Erro não tratado', err);
-  return res.status(500).json({ error: 'Erro interno do servidor.' });
+  return sendError(res, err, 'Erro não tratado');
 });
 
 const PORT = process.env.PORT || 3001;

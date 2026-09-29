@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { sendError } from '../utils/httpErrors.js';
 import AiUsage from '../models/AiUsage.js';
 import { syncAiUsageFromUmbler, getLastAiUsageSync } from '../services/aiUsageSync.js';
 
@@ -168,8 +169,7 @@ export async function getCosts(req: Request, res: Response) {
       },
     });
   } catch (error: any) {
-    console.error('Erro ao calcular custos de IA:', error.message);
-    return res.status(500).json({ error: error.message || 'Erro ao calcular custos de IA.' });
+    return sendError(res, error, 'GET /api/finops/costs');
   }
 }
 
@@ -179,7 +179,6 @@ export async function syncUsage(req: Request, res: Response) {
     const result = await syncAiUsageFromUmbler({ full: req.query.full === 'true' });
     return res.json(result);
   } catch (error: any) {
-    console.error('Erro ao sincronizar custos de IA da Umbler:', error.message);
-    return res.status(500).json({ error: error.message || 'Erro ao sincronizar custos de IA.' });
+    return sendError(res, error, 'POST /api/finops/sync');
   }
 }

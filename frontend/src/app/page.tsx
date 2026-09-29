@@ -13,7 +13,7 @@ import {
   ArrowLeft, BarChart3, Coins, Settings, LogOut, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
 } from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
-import { API_URL, fetcher } from './lib/api';
+import { API_URL, apiErrorMessage, fetcher } from './lib/api';
 import { getCurrentUser, logout } from './lib/auth';
 
 
@@ -44,6 +44,46 @@ function getRatingColor(rating: number | null) {
   if (rating === 4) return { text: 'text-lime-400', fill: 'fill-lime-400', bg: 'bg-lime-500/10', border: 'border-lime-500/30' };
   if (rating === 5) return { text: 'text-emerald-400', fill: 'fill-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
   return { text: 'text-slate-400', fill: 'fill-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
+}
+
+function getGreeting(date = new Date()) {
+  const h = date.getHours();
+  return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+}
+
+function DashboardPlaceholder({ failed }: { failed: boolean }) {
+  return failed
+    ? <span className="text-slate-600" title="Não foi possível carregar">—</span>
+    : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />;
+}
+
+function ChatListError({ message, stale, retrying, onRetry }: { message: string; stale: boolean; retrying: boolean; onRetry: () => void }) {
+  const retryButton = (
+    <button
+      onClick={onRetry}
+      disabled={retrying}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold cursor-pointer disabled:opacity-50"
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} /> {retrying ? 'Tentando...' : 'Tentar novamente'}
+    </button>
+  );
+  // Com dados antigos na tela: aviso compacto no topo, sem esconder a lista.
+  if (stale) {
+    return (
+      <div role="alert" className="m-2 flex items-center justify-between gap-2 bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl px-3 py-2 text-[11px]">
+        <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Falha ao atualizar. Exibindo a última lista carregada.</span>
+        {retryButton}
+      </div>
+    );
+  }
+  return (
+    <div role="alert" className="p-10 text-center space-y-3">
+      <AlertTriangle className="w-8 h-8 text-red-400 mx-auto" />
+      <p className="font-semibold text-base text-slate-300">Não foi possível carregar os chats</p>
+      <p className="text-xs text-slate-500 max-w-xs mx-auto">{message}</p>
+      {retryButton}
+    </div>
+  );
 }
 
 // Polling do SWR só com a aba visível e online; ao voltar para a aba, revalida na hora.
@@ -233,7 +273,8 @@ export default function AuditDashboard() {
   const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
   
   const [showWelcome, setShowWelcome] = useState(false);
-  const { data: dashboardData } = useSWR(showWelcome ? `${API_URL}/dashboard` : null, fetcher);
+  const { data: dashboardData, error: dashboardError, isValidating: loadingDashboard, mutate: retryDashboard } =
+    useSWR(showWelcome ? `${API_URL}/dashboard` : null, fetcher, { shouldRetryOnError: false });
 
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
@@ -314,7 +355,7 @@ export default function AuditDashboard() {
     ? `${API_URL}/chats?search=${debouncedSearch}&attendantId=${activeAttendantId}&status=${statusTab}` 
     : null;
     
-  const { data: chatsData, isLoading: loadingChats, mutate: mutateChats } = useSWR(
+  const { data: chatsData, error: chatsError, isLoading: loadingChats, isValidating: validatingChats, mutate: mutateChats } = useSWR(
     chatQueryUrl,
     fetcher,
     { refreshInterval: 15000, ...BACKGROUND_SAFE_POLLING }
@@ -551,57 +592,71 @@ export default function AuditDashboard() {
     });
   };
 
+  // Executa uma ação de configuração com toast de sucesso/erro; devolve true se deu certo.
+  const runAction = async (action: () => Promise<unknown>, success: string, failure: string) => {
+    try {
+      await action();
+      toast.success(success);
+      return true;
+    } catch (err) {
+      toast.error(apiErrorMessage(err, failure));
+      return false;
+    }
+  };
+
   const handleAddTopic = async () => {
-    if (!newTopicName.trim()) return;
-    await axios.post(`${API_URL}/topics`, { name: newTopicName.trim() });
-    setNewTopicName('');
+    const name = newTopicName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.post(`${API_URL}/topics`, { name }), `Tema "${name}" criado.`, 'Erro ao criar o tema.')) setNewTopicName('');
     mutateTopics();
   };
   const handleRenameTopic = async (id: string) => {
-    if (!editingTopicName.trim()) return;
-    await axios.put(`${API_URL}/topics/${id}`, { name: editingTopicName.trim() });
-    setEditingTopicId(null);
+    const name = editingTopicName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.put(`${API_URL}/topics/${id}`, { name }), 'Tema renomeado.', 'Erro ao renomear o tema.')) setEditingTopicId(null);
     mutateTopics();
   };
   const handleDeleteTopic = async (id: string) => {
     if (!confirm('Excluir este tópico e seus subtópicos?')) return;
-    await axios.delete(`${API_URL}/topics/${id}`);
+    await runAction(() => axios.delete(`${API_URL}/topics/${id}`), 'Tema excluído.', 'Erro ao excluir o tema.');
     mutateTopics();
   };
   const handleAddSubtopic = async (topicId: string) => {
-    if (!newSubtopicName.trim()) return;
-    await axios.post(`${API_URL}/topics/${topicId}/subtopics`, { name: newSubtopicName.trim() });
-    setNewSubtopicName('');
-    setAddingSubtopicTo(null);
+    const name = newSubtopicName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.post(`${API_URL}/topics/${topicId}/subtopics`, { name }), `Subtema "${name}" criado.`, 'Erro ao criar o subtema.')) {
+      setNewSubtopicName('');
+      setAddingSubtopicTo(null);
+    }
     mutateTopics();
   };
   const handleRenameSubtopic = async (id: string) => {
-    if (!editingSubtopicName.trim()) return;
-    await axios.put(`${API_URL}/subtopics/${id}`, { name: editingSubtopicName.trim() });
-    setEditingSubtopicId(null);
+    const name = editingSubtopicName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.put(`${API_URL}/subtopics/${id}`, { name }), 'Subtema renomeado.', 'Erro ao renomear o subtema.')) setEditingSubtopicId(null);
     mutateTopics();
   };
   const handleDeleteSubtopic = async (id: string) => {
     if (!confirm('Excluir este subtópico?')) return;
-    await axios.delete(`${API_URL}/subtopics/${id}`);
+    await runAction(() => axios.delete(`${API_URL}/subtopics/${id}`), 'Subtema excluído.', 'Erro ao excluir o subtema.');
     mutateTopics();
   };
 
   const handleAddReason = async () => {
-    if (!newReasonName.trim()) return;
-    await axios.post(`${API_URL}/fail-reasons`, { name: newReasonName.trim() });
-    setNewReasonName('');
+    const name = newReasonName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.post(`${API_URL}/fail-reasons`, { name }), `Motivo "${name}" criado.`, 'Erro ao criar o motivo.')) setNewReasonName('');
     mutateFailReasons();
   };
   const handleRenameReason = async (id: string) => {
-    if (!editingReasonName.trim()) return;
-    await axios.put(`${API_URL}/fail-reasons/${id}`, { name: editingReasonName.trim() });
-    setEditingReasonId(null);
+    const name = editingReasonName.trim();
+    if (!name) return;
+    if (await runAction(() => axios.put(`${API_URL}/fail-reasons/${id}`, { name }), 'Motivo renomeado.', 'Erro ao renomear o motivo.')) setEditingReasonId(null);
     mutateFailReasons();
   };
   const handleDeleteReason = async (id: string) => {
     if (!confirm('Excluir este motivo de erro permanentemente?')) return;
-    await axios.delete(`${API_URL}/fail-reasons/${id}`);
+    await runAction(() => axios.delete(`${API_URL}/fail-reasons/${id}`), 'Motivo excluído.', 'Erro ao excluir o motivo.');
     mutateFailReasons();
   };
 
@@ -623,14 +678,30 @@ export default function AuditDashboard() {
             
             <h2 className="text-2xl md:text-3xl font-black text-slate-100 mb-2">Resumo da Operação Diária</h2>
             <p className="text-slate-400 mb-8 text-center max-w-lg text-sm">
-              Bom dia! Antes de iniciar as auditorias, confira como está a saúde do sistema e do Ágape hoje.
+              {getGreeting()}! Antes de iniciar as auditorias, confira como está a saúde do sistema e do Ágape hoje.
             </p>
+
+            {dashboardError && !dashboardData && (
+              <div role="alert" className="w-full mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 bg-red-500/10 border border-red-500/30 text-red-300 rounded-2xl px-4 py-3 text-sm">
+                <span className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {apiErrorMessage(dashboardError, 'Não foi possível carregar o resumo do dia.')}
+                </span>
+                <button
+                  onClick={() => retryDashboard()}
+                  disabled={loadingDashboard}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDashboard ? 'animate-spin' : ''}`} /> Tentar novamente
+                </button>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full mb-8">
               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
                 <Clock className="w-6 h-6 text-amber-400 mb-3" />
                 <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.pendingChats : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                  {dashboardData ? dashboardData.pendingChats : <DashboardPlaceholder failed={!!dashboardError} />}
                 </span>
                 <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Chats Pendentes</span>
               </div>
@@ -638,7 +709,7 @@ export default function AuditDashboard() {
               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
                 <Sparkles className="w-6 h-6 text-emerald-400 mb-3" />
                 <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.newStrapiRules : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                  {dashboardData ? dashboardData.newStrapiRules : <DashboardPlaceholder failed={!!dashboardError} />}
                 </span>
                 <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Novas Regras (24h)</span>
               </div>
@@ -646,7 +717,7 @@ export default function AuditDashboard() {
               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
                 <CheckSquare className="w-6 h-6 text-blue-400 mb-3" />
                 <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.auditsThisWeek : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                  {dashboardData ? dashboardData.auditsThisWeek : <DashboardPlaceholder failed={!!dashboardError} />}
                 </span>
                 <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Auditorias (Semana)</span>
               </div>
@@ -654,7 +725,7 @@ export default function AuditDashboard() {
               <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
                 <Star className="w-6 h-6 text-amber-400 mb-3" />
                 <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.weeklyAvgRating : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />}
+                  {dashboardData ? dashboardData.weeklyAvgRating : <DashboardPlaceholder failed={!!dashboardError} />}
                 </span>
                 <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Nota Média (Semana)</span>
               </div>
@@ -939,7 +1010,15 @@ export default function AuditDashboard() {
           onScroll={handleScroll} 
           className="flex-1 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar relative p-2"
         >
-          {loadingChats && visibleChats.length === 0 ? (
+          {chatsError && (
+            <ChatListError
+              message={apiErrorMessage(chatsError, 'Não foi possível carregar os chats.')}
+              stale={!!chatsData}
+              retrying={validatingChats}
+              onRetry={() => mutateChats()}
+            />
+          )}
+          {chatsError && !chatsData ? null : loadingChats && visibleChats.length === 0 ? (
             <div className="p-4 space-y-5">
               {[1, 2, 3, 4, 5, 6].map((i) => (
                 <div key={i} className="flex gap-4 items-center p-2">
