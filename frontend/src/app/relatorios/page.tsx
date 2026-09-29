@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '../hooks/useAuth';
 import { API_URL, downloadFile } from '../lib/api';
+import { formatDayBR } from '../lib/format';
+import { StatCard } from '../components/common/StatCard';
 import {
   ArrowLeft, BarChart3, Star, Calendar,
-  GraduationCap, ListChecks, FileSpreadsheet, LucideIcon,
+  GraduationCap, ListChecks, FileSpreadsheet,
   TrendingUp, Activity, CheckCircle2, MessageSquareWarning,
   PieChart, Target, AlertTriangle, Download // <-- Download importado aqui
 } from 'lucide-react';
@@ -31,16 +33,8 @@ interface ValueData {
   messagesAuditedByDay: DailyRow[]; 
   ratingDistribution: { rating: number; count: number }[];
 }
-interface StatCardProps { icon: LucideIcon; label: string; value: string | number; accent: string; }
 
 // --- Formatadores de Data BR ---
-function formatDayBR(isoStr: string) {
-  if (!isoStr) return '';
-  const parts = isoStr.split('-');
-  if (parts.length === 3) return `${parts[2]}/${parts[1]}`;
-  return isoStr;
-}
-
 function formatFullDateBR(isoStr: string) {
   if (!isoStr) return '';
   const parts = isoStr.split('-');
@@ -49,20 +43,6 @@ function formatFullDateBR(isoStr: string) {
 }
 
 // --- Componentes ---
-function StatCard({ icon: Icon, label, value, accent }: StatCardProps) {
-  return (
-    <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-5 flex items-center gap-4 transition-all hover:scale-[1.02] hover:bg-slate-900/80 shadow-lg shadow-black/20">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${accent}`}>
-        <Icon className="w-6 h-6" />
-      </div>
-      <div>
-        <div className="text-2xl font-black text-slate-100 tracking-tight leading-tight">{value}</div>
-        <div className="text-xs font-medium text-slate-500 mt-1">{label}</div>
-      </div>
-    </div>
-  );
-}
-
 // Gráfico de Temas (Volume)
 function ThemesBarChart({ rows }: { rows: ThemeRow[] }) {
   const max = Math.max(1, ...rows.map((r) => r.total));

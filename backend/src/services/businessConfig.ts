@@ -89,3 +89,8 @@ export function hasAgapeInteracted(chat: any, agapeId: string): boolean {
     chat.lastOrganizationMember?.id === agapeId
   );
 }
+
+// Detecta variantes/instâncias de teste do bot da Ágape (ex: "Teste ativo Ágape"),
+// que na Umbler não compartilham o mesmo organizationMember.id da instância oficial.
+export const isAgapeBotName = (botName?: string) =>
+  Boolean(botName) && botName!.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes('agape');

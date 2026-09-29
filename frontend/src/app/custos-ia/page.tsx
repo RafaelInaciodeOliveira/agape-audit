@@ -9,10 +9,12 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import {
-  ArrowLeft, Calendar, Coins, Cpu, Crown, Receipt, BarChart3, MessageSquareWarning, RefreshCw, ChevronLeft, ChevronRight, LucideIcon,
+  ArrowLeft, Calendar, Coins, Cpu, Crown, Receipt, BarChart3, MessageSquareWarning, RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { API_URL, fetcher } from '../lib/api';
+import { formatDayBR } from '../lib/format';
+import { StatCard } from '../components/common/StatCard';
 
 
 
@@ -83,11 +85,6 @@ const compactNumber = (value: number) =>
 
 const fullNumber = (value: number) => new Intl.NumberFormat('pt-BR').format(value || 0);
 
-function formatDayBR(isoStr: string) {
-  const parts = isoStr.split('-');
-  return parts.length === 3 ? `${parts[2]}/${parts[1]}` : isoStr;
-}
-
 function formatFullDateBR(isoStr: string) {
   const parts = isoStr.split('-');
   return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : isoStr;
@@ -116,23 +113,6 @@ function buildSeries(byModel: ModelCost[]) {
 }
 
 // --- Componentes ---
-interface StatCardProps { icon: LucideIcon; label: string; value: string; subValue?: string; subValueTitle?: string; hint?: string; accent: string; }
-
-function StatCard({ icon: Icon, label, value, subValue, subValueTitle, hint, accent }: StatCardProps) {
-  return (
-    <div className="bg-slate-900/60 border border-slate-800/60 rounded-xl p-5 flex items-center gap-4 transition-all hover:scale-[1.02] hover:bg-slate-900/80 shadow-lg shadow-black/20 min-w-0">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${accent}`}>
-        <Icon className="w-6 h-6" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-2xl font-black text-slate-100 tracking-tight leading-tight truncate" title={value}>{value}</div>
-        {subValue && <div className="text-sm font-semibold text-slate-400 font-mono tabular-nums truncate" title={subValueTitle}>{subValue}</div>}
-        <div className="text-xs font-medium text-slate-500 mt-1">{label}</div>
-        {hint && <div className="text-[11px] text-slate-400 mt-0.5 truncate" title={hint}>{hint}</div>}
-      </div>
-    </div>
-  );
-}
 
 interface TooltipEntry { dataKey?: string | number; value?: number | string; }
 interface CostTooltipProps { active?: boolean; payload?: readonly TooltipEntry[]; label?: string | number; series: Series[]; currency: string; }
@@ -459,6 +439,7 @@ export default function AiCostsDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
               <StatCard
+                truncate
                 icon={Coins}
                 label="Custo Total"
                 value={money(summary.totalCost, data.currency)}
@@ -468,6 +449,7 @@ export default function AiCostsDashboard() {
                 accent="bg-blue-500/10 text-blue-400 border border-blue-500/20"
               />
               <StatCard
+                truncate
                 icon={Cpu}
                 label="Total de Tokens (estimado)"
                 value={`~${compactNumber(summary.totalTokens)}`}
@@ -475,6 +457,7 @@ export default function AiCostsDashboard() {
                 accent="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
               />
               <StatCard
+                truncate
                 icon={Crown}
                 label="Modelo Mais Custoso"
                 value={topModel ? topModel.modelName : '—'}

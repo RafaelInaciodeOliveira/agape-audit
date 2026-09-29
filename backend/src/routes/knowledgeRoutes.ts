@@ -3,6 +3,7 @@ import multer from 'multer';
 import { getDb, type Db } from '../config/db.js';
 import { UmblerService } from '../services/umbler.js';
 import { logError } from '../utils/logger.js';
+import { newId } from '../utils/ids.js';
 import { sendError, UmblerError } from '../utils/httpErrors.js';
 import {
   idSchema, moduleNameSchema, paramValidator, parseInput, syncUmblerBodySchema, uploadBodySchema,
@@ -23,10 +24,6 @@ export async function ensureKnowledgeIndexes() {
     db.collection('knowledgeBackups').createIndex({ module: 1, createdAt: -1, id: -1 }),
     db.collection('knowledgeBackups').createIndex({ id: 1 }),
   ]);
-}
-
-function newId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

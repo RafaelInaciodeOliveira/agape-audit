@@ -1,280 +1,43 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import axios from 'axios';
-import Link from 'next/link';
 import useSWR from 'swr';
 import { Toaster, toast } from 'sonner';
-import {
-  Star, BookOpen, Send, RefreshCw, Clock, Search, 
-  Sparkles, Bot, UserCheck, CheckSquare, X, ShieldCheck, 
-  Activity, Tag, Plus, Trash2, Pencil, 
-  ArrowLeft, BarChart3, Coins, Settings, LogOut, ClipboardCheck, Image as ImageIcon, EyeOff, Eye, AlertTriangle, Filter, Check, ListX, ChevronDown
-} from 'lucide-react';
 import { useAuth } from './hooks/useAuth';
-import { API_URL, apiErrorMessage, fetcher } from './lib/api';
-import { getCurrentUser, logout } from './lib/auth';
-
-
-
-// --- TIPAGENS ---
-interface Subtopic { id: string; name: string; }
-interface Topic { id: string; name: string; subtopics?: Subtopic[]; }
-interface FailReason { id: string; name: string; }
-interface Attendant { id: string; name: string; }
-interface Audit { rating: number | null; failReasons?: string[]; auditorFeedback: string; topicId?: string; subtopicId?: string; }
-interface Chat { id: string; contactName: string; contactPhoto?: string; carteiraTag: string; allTags?: string[]; updatedAt: string; lastMessage?: unknown; audit?: Audit; hasMessageAudits?: boolean; }
-interface Message { id: string; source: string; text?: string; fallbackText?: string; body?: string; caption?: string; content?: string | Record<string, unknown>; type?: string; messageType?: string; fileType?: string; prefix?: string; createdAtUTC?: string; createdAt?: string; dateUTC?: string; date?: string; eventAtUTC?: string; sentByOrganizationMember?: { id: string }; botInstance?: { botName: string }; }
-interface MessageAudit { topicId?: string; subtopicId?: string; failReasons?: string[]; auditorFeedback?: string; clientQuestion?: string; targetModule?: string; }
-// ----------------
-
-const DYNAMIC_TAG_COLORS = [
-  'bg-red-500/20 text-red-300 border-red-500/50',
-  'bg-violet-500/20 text-violet-300 border-violet-500/50',
-  'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/50',
-  'bg-rose-500/20 text-rose-300 border-rose-500/50',
-  'bg-lime-500/20 text-lime-300 border-lime-500/50',
-];
-
-function getRatingColor(rating: number | null) {
-  if (rating === 1) return { text: 'text-red-500', fill: 'fill-red-500', bg: 'bg-red-500/10', border: 'border-red-500/30' };
-  if (rating === 2) return { text: 'text-orange-500', fill: 'fill-orange-500', bg: 'bg-orange-500/10', border: 'border-orange-500/30' };
-  if (rating === 3) return { text: 'text-amber-400', fill: 'fill-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' };
-  if (rating === 4) return { text: 'text-lime-400', fill: 'fill-lime-400', bg: 'bg-lime-500/10', border: 'border-lime-500/30' };
-  if (rating === 5) return { text: 'text-emerald-400', fill: 'fill-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' };
-  return { text: 'text-slate-400', fill: 'fill-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
-}
-
-function getGreeting(date = new Date()) {
-  const h = date.getHours();
-  return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
-}
-
-function DashboardPlaceholder({ failed }: { failed: boolean }) {
-  return failed
-    ? <span className="text-slate-600" title="Não foi possível carregar">—</span>
-    : <RefreshCw className="w-5 h-5 animate-spin text-slate-600 my-2" />;
-}
-
-function ChatListError({ message, stale, retrying, onRetry }: { message: string; stale: boolean; retrying: boolean; onRetry: () => void }) {
-  const retryButton = (
-    <button
-      onClick={onRetry}
-      disabled={retrying}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold cursor-pointer disabled:opacity-50"
-    >
-      <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} /> {retrying ? 'Tentando...' : 'Tentar novamente'}
-    </button>
-  );
-  // Com dados antigos na tela: aviso compacto no topo, sem esconder a lista.
-  if (stale) {
-    return (
-      <div role="alert" className="m-2 flex items-center justify-between gap-2 bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl px-3 py-2 text-[11px]">
-        <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Falha ao atualizar. Exibindo a última lista carregada.</span>
-        {retryButton}
-      </div>
-    );
-  }
-  return (
-    <div role="alert" className="p-10 text-center space-y-3">
-      <AlertTriangle className="w-8 h-8 text-red-400 mx-auto" />
-      <p className="font-semibold text-base text-slate-300">Não foi possível carregar os chats</p>
-      <p className="text-xs text-slate-500 max-w-xs mx-auto">{message}</p>
-      {retryButton}
-    </div>
-  );
-}
+import { API_URL, fetcher } from './lib/api';
+import { getCurrentUser } from './lib/auth';
+import type { Attendant, Chat, ChatFilter, FailReason, Message, MessageAudit, Topic } from './lib/types';
+import { normalizeMessages, renderMessageContent } from './lib/chatFormat';
+import { WelcomeModal } from './components/dashboard/WelcomeModal';
+import { HideChatModal } from './components/chat/HideChatModal';
+import { ChatFiltersModal } from './components/chat/ChatFiltersModal';
+import { ChatList } from './components/chat/ChatList';
+import { ChatView } from './components/chat/ChatView';
+import { MessageAuditPanel } from './components/audit/MessageAuditPanel';
+import { ChatAuditPanel } from './components/audit/ChatAuditPanel';
+import { SettingsModal } from './components/settings/SettingsModal';
 
 // Polling do SWR só com a aba visível e online; ao voltar para a aba, revalida na hora.
 const BACKGROUND_SAFE_POLLING = { refreshWhenHidden: false, refreshWhenOffline: false, revalidateOnFocus: true } as const;
-
-function normalizeMessages(data: unknown): Message[] {
-  if (Array.isArray(data)) return data as Message[];
-  const d = data as { items?: Message[]; messages?: Message[]; data?: Message[] } | undefined;
-  return d?.items ?? d?.messages ?? d?.data ?? [];
-}
-
-function getTagBadge(tagName: string) {
-  const name = (tagName || '').trim().toUpperCase();
-  if (name.includes('ANTARES')) return { icon: '🌟', style: 'bg-amber-500/20 text-amber-300 border-amber-500/50' };
-  if (name.includes('ARCTURUS')) return { icon: '🌸', style: 'bg-pink-500/20 text-pink-300 border-pink-500/50' };
-  if (name.includes('ALPHA')) return { icon: '🔥', style: 'bg-orange-500/20 text-orange-300 border-orange-500/50' };
-  if (name.includes('SIGMA')) return { icon: '🟢', style: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50' };
-  if (name.includes('SIRIUS')) return { icon: '🟣', style: 'bg-purple-500/20 text-purple-300 border-purple-500/50' };
-  if (name.includes('CLIENTE PROVER') || name.includes('PROSPECT PROVER')) return { icon: '🔵', style: 'bg-blue-600/30 text-blue-300 border-blue-500/50' };
-  if (name.includes('CATHOLIC')) return { icon: '🟣', style: 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50' };
-  if (name.includes('GRUPO PROVER')) return { icon: '👯', style: 'bg-cyan-600/30 text-cyan-300 border-cyan-500/50' };
-  if (name.includes('MULTIIGREJA')) return { icon: '🏘', style: 'bg-teal-600/30 text-teal-300 border-teal-500/50' };
-  if (name.includes('ONBOARDING')) return { icon: '🚀', style: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/50' };
-  if (name.includes('PROVER NA PRÁTICA') || name.includes('BKO') || name.includes('COMERCIAL')) return { icon: '🐨', style: 'bg-slate-700/60 text-slate-200 border-slate-600' };
-
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  const colorStyle = DYNAMIC_TAG_COLORS[Math.abs(hash) % DYNAMIC_TAG_COLORS.length];
-  return { icon: '🏷️', style: colorStyle };
-}
-
-function formatDateTime(rawDate?: string | Date): { dateStr: string; timeStr: string } {
-  if (!rawDate) return { dateStr: 'Hoje', timeStr: '' };
-  try {
-    const d = new Date(rawDate);
-    if (isNaN(d.getTime())) return { dateStr: 'Hoje', timeStr: '' };
-    const timeStr = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) return { dateStr: 'Hoje', timeStr };
-    return { dateStr: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }), timeStr };
-  } catch {
-    return { dateStr: 'Hoje', timeStr: '' };
-  }
-}
-
-function formatRelativeTime(rawDate?: string | Date): string {
-  if (!rawDate) return '';
-  const d = new Date(rawDate);
-  if (isNaN(d.getTime())) return '';
-  const diffMs = Date.now() - d.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'agora';
-  if (diffMin < 60) return `há ${diffMin} min`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `há ${diffH} h`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 30) return `há ${diffD} dia${diffD > 1 ? 's' : ''}`;
-  const diffMonths = Math.floor(diffD / 30);
-  if (diffMonths < 12) return `há ${diffMonths} ${diffMonths > 1 ? 'meses' : 'mês'}`;
-  const diffYears = Math.floor(diffMonths / 12);
-  return `há ${diffYears} ano${diffYears > 1 ? 's' : ''}`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderMessageContent(msg: any): string {
-  if (!msg) return 'Sem mensagem';
-  if (typeof msg === 'string') {
-    if (msg.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(msg);
-        if (parsed.billingType || parsed.billable !== undefined) return '📢 [Evento de Sistema / Template Enviado]';
-        return renderMessageContent(parsed);
-      } catch { return msg; }
-    }
-    return msg;
-  }
-  if (typeof msg === 'object') {
-    const type = (msg.type || msg.messageType || '').toString().toLowerCase();
-    if (type === 'audio' || msg.fileType === 'audio') return '🎤 Áudio';
-    if (type === 'image' || msg.fileType === 'image') return '📷 Imagem';
-    if (type === 'document' || type === 'file') return '📄 Documento';
-    if (type === 'video') return '🎥 Vídeo';
-    if (type === 'sticker') return '🎴 Figurinha';
-    if (msg.text && typeof msg.text === 'string') return msg.text;
-    if (msg.fallbackText) return msg.fallbackText;
-    if (msg.body) return msg.body;
-    if (msg.caption) return msg.caption;
-    if (msg.content) {
-      const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-      if (contentStr.includes('"billingType"') || contentStr.includes('"billable"')) return '📢 [Mensagem de Template Automática]';
-      return renderMessageContent(msg.content);
-    }
-    return 'Mensagem do sistema';
-  }
-  return 'Mensagem enviada';
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractMediaUrl(msg: any): string | null {
-  if (!msg) return null;
-  if (typeof msg.content === 'string' && msg.content.startsWith('http')) return msg.content;
-  if (typeof msg.url === 'string') return msg.url;
-  if (typeof msg.mediaUrl === 'string') return msg.mediaUrl;
-  if (msg.content && typeof msg.content === 'object' && msg.content.url) return msg.content.url;
-  
-  try {
-    const str = JSON.stringify(msg);
-    const match = str.match(/(https:\/\/[^"]+\.amazonaws\.com[^"]+)/);
-    if (match) return match[0];
-  } catch {
-    // Ignora erros de JSON
-  }
-  return null;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function renderMediaNode(msg: any) {
-  const type = (msg?.type || msg?.messageType || msg?.fileType || '').toString().toLowerCase();
-  const mediaUrl = extractMediaUrl(msg);
-  const textContent = renderMessageContent(msg);
-
-  if (type === 'image' || type === 'sticker' || (mediaUrl && textContent === '📷 Imagem')) {
-    return (
-      <div className="space-y-2">
-        {mediaUrl ? (
-          <a href={mediaUrl} target="_blank" rel="noopener noreferrer">
-            <img 
-              src={mediaUrl} 
-              alt="Mídia do Chat" 
-              className="max-w-xs max-h-64 rounded-xl border border-slate-700/50 object-cover cursor-pointer hover:opacity-80 transition-all duration-300 shadow-sm" 
-            />
-          </a>
-        ) : (
-          <span className="flex items-center gap-2 bg-slate-900/50 p-2.5 rounded-lg border border-slate-700/50 text-xs">
-            <ImageIcon className="w-4 h-4 text-slate-400"/> Imagem indisponível
-          </span>
-        )}
-        {textContent && textContent !== '📷 Imagem' && <p className="whitespace-pre-wrap">{textContent}</p>}
-      </div>
-    );
-  }
-
-  if (type === 'audio' || (mediaUrl && textContent === '🎤 Áudio')) {
-    return (
-      <div className="space-y-2 min-w-[250px] max-w-sm">
-        {mediaUrl ? (
-          <div className="flex flex-col gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-700/50 shadow-inner">
-            <audio controls src={mediaUrl} className="w-full h-10 outline-none" />
-            <a 
-              href={mediaUrl} 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              download 
-              className="text-[10px] text-slate-400 hover:text-blue-300 transition-colors underline text-center block" 
-            >
-              Baixar arquivo original
-            </a>
-          </div>
-        ) : (
-          <span className="flex items-center gap-2 bg-slate-900/50 p-2.5 rounded-lg border border-slate-700/50 text-xs">
-            🎤 Áudio indisponível
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  return <div className="whitespace-pre-wrap leading-relaxed">{textContent}</div>;
-}
 
 export default function AuditDashboard() {
   const isAuthorized = useAuth();
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [displayedCount, setDisplayedCount] = useState(30); 
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
   const [selectedAttendantId, setSelectedAttendantId] = useState('');
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [statusTab, setStatusTab] = useState('abertos');
   
   const [showFiltersModal, setShowFiltersModal] = useState(false);
-  const [chatFilters, setChatFilters] = useState<Array<number | 'pendente' | 'parcial'>>([]);
+  const [chatFilters, setChatFilters] = useState<ChatFilter[]>([]);
   
   const [showWelcome, setShowWelcome] = useState(false);
-  const { data: dashboardData, error: dashboardError, isValidating: loadingDashboard, mutate: retryDashboard } =
-    useSWR(showWelcome ? `${API_URL}/dashboard` : null, fetcher, { shouldRetryOnError: false });
 
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
@@ -286,19 +49,6 @@ export default function AuditDashboard() {
   const [feedback, setFeedback] = useState('');
   
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'topics' | 'reasons'>('topics');
-  
-  const [newTopicName, setNewTopicName] = useState('');
-  const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
-  const [editingTopicName, setEditingTopicName] = useState('');
-  const [addingSubtopicTo, setAddingSubtopicTo] = useState<string | null>(null);
-  const [newSubtopicName, setNewSubtopicName] = useState('');
-  const [editingSubtopicId, setEditingSubtopicId] = useState<string | null>(null);
-  const [editingSubtopicName, setEditingSubtopicName] = useState('');
-
-  const [newReasonName, setNewReasonName] = useState('');
-  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
-  const [editingReasonName, setEditingReasonName] = useState('');
 
   const [messageAudits, setMessageAudits] = useState<Record<string, MessageAudit>>({});
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
@@ -335,16 +85,6 @@ export default function AuditDashboard() {
   }, []);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedSearch(searchTerm);
     }, 500);
@@ -375,7 +115,7 @@ export default function AuditDashboard() {
   // auto-scroll não dispara a cada polling sem mensagens novas.
   const messages = useMemo(() => normalizeMessages(messagesData), [messagesData]);
 
-  const toggleFilter = (val: number | 'pendente' | 'parcial') => {
+  const toggleFilter = (val: ChatFilter) => {
     setChatFilters(prev => 
       prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]
     );
@@ -400,7 +140,7 @@ export default function AuditDashboard() {
       const hasRating = chat.audit && chat.audit.rating && chat.audit.rating > 0;
       const isPartial = (chat.audit && !hasRating) || chat.hasMessageAudits;
       
-      let cStatus: number | 'pendente' | 'parcial' = 'pendente';
+      let cStatus: ChatFilter = 'pendente';
       if (hasRating) cStatus = chat.audit!.rating as number;
       else if (isPartial) cStatus = 'parcial';
 
@@ -592,74 +332,6 @@ export default function AuditDashboard() {
     });
   };
 
-  // Executa uma ação de configuração com toast de sucesso/erro; devolve true se deu certo.
-  const runAction = async (action: () => Promise<unknown>, success: string, failure: string) => {
-    try {
-      await action();
-      toast.success(success);
-      return true;
-    } catch (err) {
-      toast.error(apiErrorMessage(err, failure));
-      return false;
-    }
-  };
-
-  const handleAddTopic = async () => {
-    const name = newTopicName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.post(`${API_URL}/topics`, { name }), `Tema "${name}" criado.`, 'Erro ao criar o tema.')) setNewTopicName('');
-    mutateTopics();
-  };
-  const handleRenameTopic = async (id: string) => {
-    const name = editingTopicName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.put(`${API_URL}/topics/${id}`, { name }), 'Tema renomeado.', 'Erro ao renomear o tema.')) setEditingTopicId(null);
-    mutateTopics();
-  };
-  const handleDeleteTopic = async (id: string) => {
-    if (!confirm('Excluir este tópico e seus subtópicos?')) return;
-    await runAction(() => axios.delete(`${API_URL}/topics/${id}`), 'Tema excluído.', 'Erro ao excluir o tema.');
-    mutateTopics();
-  };
-  const handleAddSubtopic = async (topicId: string) => {
-    const name = newSubtopicName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.post(`${API_URL}/topics/${topicId}/subtopics`, { name }), `Subtema "${name}" criado.`, 'Erro ao criar o subtema.')) {
-      setNewSubtopicName('');
-      setAddingSubtopicTo(null);
-    }
-    mutateTopics();
-  };
-  const handleRenameSubtopic = async (id: string) => {
-    const name = editingSubtopicName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.put(`${API_URL}/subtopics/${id}`, { name }), 'Subtema renomeado.', 'Erro ao renomear o subtema.')) setEditingSubtopicId(null);
-    mutateTopics();
-  };
-  const handleDeleteSubtopic = async (id: string) => {
-    if (!confirm('Excluir este subtópico?')) return;
-    await runAction(() => axios.delete(`${API_URL}/subtopics/${id}`), 'Subtema excluído.', 'Erro ao excluir o subtema.');
-    mutateTopics();
-  };
-
-  const handleAddReason = async () => {
-    const name = newReasonName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.post(`${API_URL}/fail-reasons`, { name }), `Motivo "${name}" criado.`, 'Erro ao criar o motivo.')) setNewReasonName('');
-    mutateFailReasons();
-  };
-  const handleRenameReason = async (id: string) => {
-    const name = editingReasonName.trim();
-    if (!name) return;
-    if (await runAction(() => axios.put(`${API_URL}/fail-reasons/${id}`, { name }), 'Motivo renomeado.', 'Erro ao renomear o motivo.')) setEditingReasonId(null);
-    mutateFailReasons();
-  };
-  const handleDeleteReason = async (id: string) => {
-    if (!confirm('Excluir este motivo de erro permanentemente?')) return;
-    await runAction(() => axios.delete(`${API_URL}/fail-reasons/${id}`), 'Motivo excluído.', 'Erro ao excluir o motivo.');
-    mutateFailReasons();
-  };
-
   if (!isAuthorized) {
     return <div className="h-screen w-screen bg-slate-950 flex items-center justify-center"></div>;
   }
@@ -668,1079 +340,102 @@ export default function AuditDashboard() {
     <div className="flex h-screen bg-slate-950 text-slate-100 font-sans antialiased overflow-hidden">
       <Toaster theme="dark" position="top-right" richColors />
 
-      {/* --- DASHBOARD DE BOAS-VINDAS --- */}
-      {showWelcome && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-4xl w-full shadow-2xl flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
-            <div className="w-16 h-16 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center mb-5 shadow-inner">
-              <ShieldCheck className="w-8 h-8 text-blue-400" />
-            </div>
-            
-            <h2 className="text-2xl md:text-3xl font-black text-slate-100 mb-2">Resumo da Operação Diária</h2>
-            <p className="text-slate-400 mb-8 text-center max-w-lg text-sm">
-              {getGreeting()}! Antes de iniciar as auditorias, confira como está a saúde do sistema e do Ágape hoje.
-            </p>
+      {showWelcome && <WelcomeModal onClose={() => setShowWelcome(false)} />}
 
-            {dashboardError && !dashboardData && (
-              <div role="alert" className="w-full mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 bg-red-500/10 border border-red-500/30 text-red-300 rounded-2xl px-4 py-3 text-sm">
-                <span className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  {apiErrorMessage(dashboardError, 'Não foi possível carregar o resumo do dia.')}
-                </span>
-                <button
-                  onClick={() => retryDashboard()}
-                  disabled={loadingDashboard}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold cursor-pointer disabled:opacity-50 shrink-0"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loadingDashboard ? 'animate-spin' : ''}`} /> Tentar novamente
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full mb-8">
-              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
-                <Clock className="w-6 h-6 text-amber-400 mb-3" />
-                <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.pendingChats : <DashboardPlaceholder failed={!!dashboardError} />}
-                </span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Chats Pendentes</span>
-              </div>
-              
-              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
-                <Sparkles className="w-6 h-6 text-emerald-400 mb-3" />
-                <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.newStrapiRules : <DashboardPlaceholder failed={!!dashboardError} />}
-                </span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Novas Regras (24h)</span>
-              </div>
-
-              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
-                <CheckSquare className="w-6 h-6 text-blue-400 mb-3" />
-                <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.auditsThisWeek : <DashboardPlaceholder failed={!!dashboardError} />}
-                </span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Auditorias (Semana)</span>
-              </div>
-
-              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 flex flex-col items-center text-center hover:border-slate-700 transition-colors">
-                <Star className="w-6 h-6 text-amber-400 mb-3" />
-                <span className="text-3xl font-black text-slate-100">
-                  {dashboardData ? dashboardData.weeklyAvgRating : <DashboardPlaceholder failed={!!dashboardError} />}
-                </span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-wider">Nota Média (Semana)</span>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => {
-                const today = new Date().toLocaleDateString('pt-BR');
-                localStorage.setItem('agape_welcome_seen', today);
-                setShowWelcome(false);
-              }} 
-              className="bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-95 text-white font-bold py-3 px-10 rounded-xl transition-all duration-300 ease-out cursor-pointer flex items-center gap-2"
-            >
-              <Activity className="w-4 h-4" /> Iniciar Auditorias
-            </button>
-          </div>
-        </div>
-      )}
-
-      {chatToHide && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center gap-3 text-amber-400">
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-slate-100">Ocultar Chat de Teste</h3>
-                <p className="text-xs text-slate-400">Ele será movido para a aba Ocultos</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-300 leading-relaxed bg-slate-950/50 p-4 rounded-xl border border-slate-800 font-medium">
-              Tem certeza que deseja ocultar a conversa com <strong className="text-white">&quot;{chatToHide.contactName}&quot;</strong>? Ela deixará de aparecer nos relatórios e nas listas principais.
-            </p>
-
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setChatToHide(null)}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-bold transition-all duration-200 cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmHide}
-                className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-amber-600/20 transition-all duration-200 cursor-pointer"
-              >
-                Sim, Ocultar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {chatToHide && <HideChatModal chat={chatToHide} onCancel={() => setChatToHide(null)} onConfirm={handleConfirmHide} />}
 
       {showFiltersModal && (
-        <div 
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={() => setShowFiltersModal(false)}
-        >
-          <div 
-            className="bg-slate-900 border border-slate-800 rounded-3xl p-7 max-w-sm w-full shadow-2xl space-y-6 animate-in fade-in zoom-in duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
-              <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
-                <Filter className="w-5 h-5 text-blue-400" /> Filtros Avançados
-              </h3>
-              <button onClick={() => setShowFiltersModal(false)} className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Status do Atendimento</p>
-                <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
-                  <input type="checkbox" className="hidden" checked={chatFilters.includes('pendente')} onChange={() => toggleFilter('pendente')} />
-                  <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('pendente') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
-                    {chatFilters.includes('pendente') && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                  </div>
-                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Pendente (Sem nota)</span>
-                </label>
-                <label className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
-                  <input type="checkbox" className="hidden" checked={chatFilters.includes('parcial')} onChange={() => toggleFilter('parcial')} />
-                  <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${chatFilters.includes('parcial') ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
-                    {chatFilters.includes('parcial') && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                  </div>
-                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors select-none">Parcial (Apenas mensagens)</span>
-                </label>
-              </div>
-              <div className="h-px w-full bg-slate-800/80"></div>
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Nota Geral (Satisfação)</p>
-                {[5, 4, 3, 2, 1].map((star) => {
-                  const isChecked = chatFilters.includes(star);
-                  const colorObj = getRatingColor(star);
-                  return (
-                    <label key={star} className="flex items-center gap-3 cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-slate-800/50 transition-all">
-                      <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleFilter(star)} />
-                      <div className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
-                        {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                      </div>
-                      <span className={`text-sm font-bold flex items-center gap-1.5 ${colorObj.text} transition-all select-none`}>
-                        {star} <Star className={`w-3.5 h-3.5 ${colorObj.fill}`} />
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-4 border-t border-slate-800/80">
-              <button
-                onClick={() => setChatFilters([])}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800/50 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-bold transition-all duration-200 cursor-pointer"
-              >
-                Limpar
-              </button>
-              <button
-                onClick={() => setShowFiltersModal(false)}
-                className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-blue-600/20 transition-all duration-200 cursor-pointer"
-              >
-                Ver Resultados
-              </button>
-            </div>
-          </div>
-        </div>
+        <ChatFiltersModal
+          chatFilters={chatFilters}
+          onToggle={toggleFilter}
+          onClear={() => setChatFilters([])}
+          onClose={() => setShowFiltersModal(false)}
+        />
       )}
 
-      <div className="w-[22rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
-        
-        <div className="p-5 border-b border-slate-800/80 space-y-4 bg-slate-900/40">
-          <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-blue-400 flex items-center gap-2">
-              <img src="/favicon.ico" alt="Zhavia" className="w-5 h-5 object-contain" />
-              Auditoria Ágape
-            </h1>
-            <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-mono font-medium">
-              {visibleChats.length} de {totalChats} chats
-            </span>
-          </div>
+      <ChatList
+        visibleChats={visibleChats}
+        totalChats={totalChats}
+        selectedChatId={selectedChat?.id}
+        onSelectChat={handleSelectChat}
+        statusTab={statusTab}
+        onStatusTabChange={setStatusTab}
+        attendants={attendants}
+        activeAttendantId={activeAttendantId}
+        onSelectAttendant={setSelectedAttendantId}
+        activeFilterCount={chatFilters.length}
+        onOpenFilters={() => setShowFiltersModal(true)}
+        onOpenSettings={() => setShowSettingsModal(true)}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        onScroll={handleScroll}
+        loadingChats={loadingChats}
+        chatsError={chatsError}
+        hasData={!!chatsData}
+        validatingChats={validatingChats}
+        onRetry={() => mutateChats()}
+      />
 
-          <div className="flex items-center gap-2">
-            <Link
-              href="/relatorios"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
-            >
-              <BarChart3 className="w-3.5 h-3.5" /> Relatórios
-            </Link>
-            <Link
-              href="/base-conhecimento"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
-            >
-              <BookOpen className="w-3.5 h-3.5" /> Base
-            </Link>
-            <Link
-              href="/custos-ia"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-95 transition-all duration-200 shadow-sm"
-            >
-              <Coins className="w-3.5 h-3.5" /> Custos
-            </Link>
-            <button
-              onClick={() => setShowSettingsModal(true)}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-blue-300 hover:border-blue-500/40 active:scale-90 transition-all duration-200 cursor-pointer shadow-sm"
-              title="Configurações (Temas e Motivos)"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => logout()}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 hover:text-red-300 hover:border-red-500/40 active:scale-90 transition-all duration-200 cursor-pointer shadow-sm"
-              title="Sair"
-              aria-label="Sair"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex bg-slate-900/90 p-1.5 rounded-xl border border-slate-800/80 text-xs font-semibold justify-between">
-            {[
-              { id: 'abertos', label: 'Entrada' },
-              { id: 'finalizados', label: 'Finalizados' },
-              { id: 'ocultos', label: 'Ocultos' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setStatusTab(tab.id)}
-                className={`flex-1 py-1.5 text-center rounded-lg active:scale-95 transition-all duration-200 cursor-pointer ${
-                  statusTab === tab.id 
-                    ? 'bg-blue-600 text-white shadow-md' 
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          
-          <div className="flex items-center gap-2">
-            
-            <div className="flex-1 relative" ref={dropdownRef}>
-              <button
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="w-full flex items-center justify-between gap-2 bg-blue-600/10 hover:bg-blue-600/20 active:scale-[0.98] border border-blue-500/30 rounded-xl px-3 py-2.5 transition-all duration-200 focus:outline-none cursor-pointer"
-              >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <Bot className="w-4 h-4 text-blue-400 shrink-0" />
-                  <span className="text-sm font-semibold text-blue-300 truncate">
-                    {activeAttendantId === 'TODOS' || activeAttendantId === ''
-                      ? 'Todos os atendentes' 
-                      : attendants.find(a => a.id === activeAttendantId)?.name || 'Todos os atendentes'}
-                  </span>
-                </div>
-                <ChevronDown className={`w-4 h-4 text-blue-400 shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isDropdownOpen && (
-                <div className="absolute top-full left-0 w-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden py-1 animate-in fade-in zoom-in-95 duration-100">
-                  <button
-                    onClick={() => { setSelectedAttendantId('TODOS'); setIsDropdownOpen(false); }}
-                    className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                      activeAttendantId === 'TODOS' || activeAttendantId === '' ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
-                    }`}
-                  >
-                    Todos os atendentes
-                    {(activeAttendantId === 'TODOS' || activeAttendantId === '') && <Check className="w-4 h-4 text-blue-400" />}
-                  </button>
-                  
-                  <div className="h-px bg-slate-800/80 my-1 mx-2"></div>
-                  
-                  {attendants.map((a: Attendant) => {
-                    const isSelected = activeAttendantId === a.id;
-                    return (
-                      <button
-                        key={a.id}
-                        onClick={() => { setSelectedAttendantId(a.id); setIsDropdownOpen(false); }}
-                        className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                          isSelected ? 'bg-blue-600/20 text-blue-300' : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                           {a.name.includes('Ágape') ? <Bot className="w-3.5 h-3.5 opacity-70 shrink-0" /> : <UserCheck className="w-3.5 h-3.5 opacity-70 shrink-0" />}
-                           <span className="truncate">{a.name}</span>
-                        </div>
-                        {isSelected && <Check className="w-4 h-4 text-blue-400 shrink-0" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            
-            <button 
-              onClick={() => setShowFiltersModal(true)} 
-              title="Filtros Avançados (Notas e Status)"
-              className={`p-2.5 rounded-xl border flex items-center justify-center active:scale-90 transition-all duration-200 cursor-pointer relative shrink-0 ${
-                chatFilters.length > 0 
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' 
-                  : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-blue-300 hover:border-blue-500/40'
-              }`}
-            >
-              <Filter className="w-4 h-4" />
-              {chatFilters.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-slate-950"></span>
-              )}
-            </button>
-          </div>
-
-          <div className="relative group">
-            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-500 group-hover:text-blue-400 transition-colors" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar assunto ou contato..."
-              className="w-full bg-slate-900/90 border border-slate-800 rounded-xl pl-10 pr-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-blue-500/60 transition-all"
-            />
-          </div>
-        </div>
-
-        <div 
-          onScroll={handleScroll} 
-          className="flex-1 overflow-y-auto divide-y divide-slate-800/40 custom-scrollbar relative p-2"
-        >
-          {chatsError && (
-            <ChatListError
-              message={apiErrorMessage(chatsError, 'Não foi possível carregar os chats.')}
-              stale={!!chatsData}
-              retrying={validatingChats}
-              onRetry={() => mutateChats()}
-            />
-          )}
-          {chatsError && !chatsData ? null : loadingChats && visibleChats.length === 0 ? (
-            <div className="p-4 space-y-5">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="flex gap-4 items-center p-2">
-                  <div className="w-10 h-10 rounded-full bg-slate-800/60 animate-pulse shrink-0" />
-                  <div className="flex-1 space-y-3">
-                    <div className="h-3 bg-slate-800/60 rounded w-2/3 animate-pulse" />
-                    <div className="h-2 bg-slate-800/60 rounded w-1/2 animate-pulse" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : visibleChats.length === 0 ? (
-            <div className="p-10 text-center text-slate-500 space-y-1">
-              <p className="font-semibold text-base text-slate-400">Nenhum chat encontrado</p>
-              <p className="text-xs opacity-70">Ajuste a busca ou filtros para ver mais.</p>
-            </div>
-          ) : (
-            visibleChats.map((chat: Chat) => {
-              const { dateStr, timeStr } = formatDateTime(chat.updatedAt);
-              const relativeTime = formatRelativeTime(chat.updatedAt);
-              const carteiraBadge = getTagBadge(chat.carteiraTag);
-
-              const hasRating = chat.audit && chat.audit.rating && chat.audit.rating > 0;
-              const isPartial = (chat.audit && !hasRating) || chat.hasMessageAudits;
-
-              return (
-                <div
-                  key={chat.id}
-                  onClick={() => handleSelectChat(chat)}
-                  className={`group p-4 mb-1 rounded-xl cursor-pointer hover:bg-slate-900/80 hover:shadow-lg hover:shadow-black/20 hover:scale-[1.015] active:scale-[0.99] transition-all duration-300 ease-out relative overflow-hidden ${
-                    selectedChat?.id === chat.id 
-                      ? 'bg-slate-900/90 border border-blue-500/50 shadow-md ring-1 ring-blue-500/20' 
-                      : 'border border-transparent'
-                  }`}
-                >
-                  {/* Brilho invisível que aparece no hover (Toque Apple) */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
-                  <div className="flex justify-between items-center mb-2 gap-3 relative z-10">
-                    <span className="flex items-center gap-3 min-w-0">
-                      {chat.contactPhoto ? (
-                        <img src={chat.contactPhoto} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-700" />
-                      ) : (
-                        <span className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xs shrink-0">
-                          {chat.contactName?.charAt(0)?.toUpperCase() || 'C'}
-                        </span>
-                      )}
-                      <span className="font-bold text-slate-200 text-sm truncate">
-                        {chat.contactName}
-                      </span>
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 uppercase shrink-0 shadow-sm ${carteiraBadge.style}`}>
-                      {carteiraBadge.icon} {chat.carteiraTag}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-400 truncate mb-3 leading-relaxed font-medium relative z-10">
-                    {renderMessageContent(chat.lastMessage)}
-                  </p>
-
-                  <div className="flex justify-between items-center text-[10px] font-mono font-medium relative z-10">
-                    <span className="flex items-center gap-1.5 text-slate-500" title={`${dateStr} ${timeStr ? `às ${timeStr}` : ''}`}>
-                      <Clock className="w-3.5 h-3.5 text-slate-500" />
-                      {relativeTime}
-                    </span>
-
-                    {hasRating ? (
-                      (() => {
-                        const colors = getRatingColor(chat.audit!.rating);
-                        return (
-                          <span className={`flex items-center font-bold gap-1 px-2 py-0.5 rounded shadow-sm border ${colors.bg} ${colors.border} ${colors.text}`}>
-                            <Star className={`w-3 h-3 ${colors.fill}`} /> {chat.audit!.rating}
-                          </span>
-                        );
-                      })()
-                    ) : isPartial ? (
-                      <span className="flex items-center text-amber-400 font-bold gap-1.5 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded shadow-sm">
-                        <Activity className="w-3 h-3" /> Parcial
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 font-semibold px-2 py-0.5 border border-slate-700 rounded bg-slate-900/50">
-                        Pendente
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col bg-slate-900/40 relative">
-        {selectedChat ? (
-          <>
-            <div className="p-5 border-b border-slate-800/80 bg-slate-950/90 flex justify-between items-center backdrop-blur-md z-10 shadow-sm">
-              <div className="flex items-center gap-4">
-                {selectedChat.contactPhoto ? (
-                  <img src={selectedChat.contactPhoto} alt="" className="w-12 h-12 rounded-full object-cover border border-slate-700 shadow-inner" />
-                ) : (
-                  <div className="w-12 h-12 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xl shadow-inner">
-                    {selectedChat.contactName?.charAt(0)?.toUpperCase() || 'C'}
-                  </div>
-                )}
-
-                <div>
-                  <h2 className="font-bold text-lg text-slate-100 flex items-center gap-2">
-                    {selectedChat.contactName}
-                  </h2>
-                  
-                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                    {(selectedChat.allTags || []).map((tag: string, index: number) => {
-                      const badge = getTagBadge(tag);
-                      return (
-                        <span 
-                          key={index}
-                          className={`text-xs font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 shadow-sm ${badge.style}`}
-                        >
-                          <span>{badge.icon}</span>
-                          <span>{tag}</span>
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {statusTab === 'ocultos' ? (
-                  <button
-                    onClick={handleUnhideChat}
-                    title="Restaurar este chat para a lista principal"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95 text-emerald-400 border border-emerald-500/30 transition-all duration-200 cursor-pointer shadow-sm"
-                  >
-                    <Eye className="w-4 h-4" /> Desocultar
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setChatToHide(selectedChat)}
-                    title="Ocultar chat de teste"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold bg-slate-800/50 hover:bg-red-500/10 active:scale-90 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-500/30 transition-all duration-200 cursor-pointer shadow-sm"
-                  >
-                    <EyeOff className="w-4 h-4" />
-                  </button>
-                )}
-
-                <button
-                  onClick={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
-                  title="Avaliar o atendimento como um todo (nota geral + observação)"
-                  className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold active:scale-95 transition-all duration-200 cursor-pointer shrink-0 ${
-                    selectedChat.audit
-                      ? 'bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:text-white shadow-sm'
-                      : 'bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-blue-600/30 text-white'
-                  }`}
-                >
-                  {selectedChat.audit?.rating && selectedChat.audit.rating > 0 ? (
-                    <>
-                      <Pencil className="w-3.5 h-3.5" />
-                      Editar avaliação ({selectedChat.audit.rating})
-                    </>
-                  ) : selectedChat.audit ? (
-                    <>
-                      <Pencil className="w-3.5 h-3.5" />
-                      Editar avaliação (Sem nota)
-                    </>
-                  ) : (
-                    <>
-                      <Star className="w-4 h-4" />
-                      Avaliar Atendimento
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div 
-              ref={messagesContainerRef}
-              className="flex-1 p-6 lg:p-8 overflow-y-auto space-y-5 bg-slate-900/30 custom-scrollbar"
-            >
-              {loadingMessages ? (
-                <div className="h-full flex flex-col p-2 space-y-8 overflow-hidden">
-                  <div className="flex justify-start">
-                    <div className="w-2/3 h-16 rounded-[1.25rem] rounded-bl-none bg-slate-800/40 animate-pulse" />
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <div className="w-1/2 h-20 rounded-[1.25rem] rounded-br-none bg-blue-900/10 border border-blue-500/10 animate-pulse" />
-                    <div className="w-8 h-8 rounded-full bg-slate-800/50 animate-pulse shrink-0" />
-                  </div>
-                  <div className="flex justify-start">
-                    <div className="w-1/2 h-12 rounded-[1.25rem] rounded-bl-none bg-slate-800/40 animate-pulse" />
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <div className="w-2/5 h-16 rounded-[1.25rem] rounded-br-none bg-blue-900/10 border border-blue-500/10 animate-pulse" />
-                    <div className="w-8 h-8 rounded-full bg-slate-800/50 animate-pulse shrink-0" />
-                  </div>
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
-                  <img src="/favicon.ico" alt="Zhavia" className="w-12 h-12 object-contain opacity-50 animate-pulse" />
-                  <h3 className="text-slate-400 font-bold text-base">Nenhuma mensagem salva</h3>
-                  <p className="text-slate-600 text-sm max-w-sm">
-                    Inicie ou atualize a conversa no Umbler para sincronizar.
-                  </p>
-                </div>
-              ) : (
-                messages.map((m: Message, i: number) => {
-                  const isFromContact = m.source === 'Contact';
-                  const isFromAgape = Boolean(agapeMemberId) && m.sentByOrganizationMember?.id === agapeMemberId;
-                  const isFromBotFlow = m.source === 'Bot' && !isFromAgape;
-                  const isAttendant = !isFromContact;
-                  const rawTime = m.createdAtUTC || m.createdAt || m.dateUTC || m.date || m.eventAtUTC;
-                  const { dateStr, timeStr } = formatDateTime(rawTime);
-                  const audited = messageAudits[m.id];
-                  const isSelected = selectedMessage?.id === m.id;
-
-                  let label = '';
-                  if (isFromAgape) label = '🤖 Ágape (IA)';
-                  else if (isFromBotFlow) label = `⚙️ ${m.botInstance?.botName || 'Fluxo automático'}`;
-                  else if (isAttendant) label = `🧑‍💼 ${(m.prefix || 'Atendente').replace(/\*/g, '').replace(/:$/, '')}`;
-
-                  const avatar = isFromAgape || isFromBotFlow ? (
-                    <img src="/agape.png" alt="Ágape" className="w-8 h-8 rounded-full object-cover border border-blue-300/50 shrink-0 shadow-sm" />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 shrink-0 shadow-sm">
-                      <UserCheck className="w-4 h-4" />
-                    </div>
-                  );
-
-                  return (
-                    <div
-                      key={i}
-                      className={`flex items-end gap-3 ${isFromContact ? 'justify-start' : 'justify-end'}`}
-                    >
-                      {isFromContact && (
-                        <div
-                          className="max-w-[80%] rounded-[1.25rem] px-5 py-3 text-sm shadow-sm relative group bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700/50"
-                        >
-                          {renderMediaNode(m)}
-                          <span className="block text-right text-[10px] opacity-60 font-mono mt-2">
-                            {dateStr} {timeStr && `às ${timeStr}`}
-                          </span>
-                        </div>
-                      )}
-                      {isAttendant && (
-                        <>
-                          <div
-                            onClick={() => isFromAgape && handleSelectMessage(m, i)}
-                            className={`max-w-[80%] rounded-[1.25rem] px-5 py-3 text-sm shadow-sm relative group bg-blue-600 text-white rounded-br-none shadow-blue-900/20 transition-all duration-300 border border-blue-500 ${
-                              isFromAgape ? 'cursor-pointer hover:brightness-110 hover:shadow-md' : ''
-                            } ${isSelected ? 'ring-4 ring-blue-300 scale-[1.02]' : ''}`}
-                          >
-                            <div className="flex justify-between items-center gap-5 mb-2 border-b border-white/20 pb-1.5">
-                              <span className="text-xs font-bold flex items-center gap-1.5 text-blue-50 tracking-wide">
-                                {label}
-                              </span>
-
-                              <span className="text-[10px] opacity-80 font-mono font-medium text-blue-100">
-                                {dateStr} {timeStr && `às ${timeStr}`}
-                              </span>
-                            </div>
-
-                            {renderMediaNode(m)}
-
-                            {isFromAgape && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleSelectMessage(m, i); }}
-                                className={`mt-3 w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold active:scale-95 transition-all duration-200 cursor-pointer shadow-sm ${
-                                  audited
-                                    ? 'bg-emerald-500 text-white hover:bg-emerald-400 border border-emerald-400'
-                                    : 'bg-white/15 text-white border border-white/30 hover:bg-white/25'
-                                }`}
-                              >
-                                <ClipboardCheck className="w-4 h-4" />
-                                {audited ? 'Auditado · editar' : 'Auditar esta resposta'}
-                              </button>
-                            )}
-                          </div>
-                          {avatar}
-                        </>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-              {/* Ref para o final da tela */}
-              <div ref={messagesEndRef} className="h-1" />
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-10 space-y-6">
-            <div className="relative flex items-center justify-center">
-              <div className="relative w-32 h-32 rounded-3xl bg-gradient-to-tr from-blue-600/30 via-indigo-500/20 to-cyan-400/30 border border-blue-500/40 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-blue-500/20 p-6">
-                <img src="/favicon.ico" alt="Zhavia" className="w-16 h-16 object-contain animate-pulse drop-shadow-[0_0_15px_rgba(96,165,250,0.8)]" />
-                
-                <div className="absolute -top-5.5 left-1/2 -translate-x-1/2 bg-blue-900/80 border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5 whitespace-nowrap">
-                  <Activity className="w-3 h-3 text-blue-400 animate-bounce" /> Sistema Ativo
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2 max-w-sm">
-              <h2 className="text-slate-50 font-bold text-xl flex items-center justify-center gap-2">
-                <ShieldCheck className="w-6 h-6 text-blue-400" />
-                Central de Auditoria Inteligente
-              </h2>
-              <p className="text-slate-400 text-sm leading-relaxed">
-                Selecione uma conversa ao lado para analisar o desempenho do robô Ágape e treinar a base de conhecimento de forma interativa.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
+      <ChatView
+        selectedChat={selectedChat}
+        statusTab={statusTab}
+        onUnhide={handleUnhideChat}
+        onRequestHide={() => setChatToHide(selectedChat)}
+        onOpenChatAudit={() => { setSelectedMessage(null); setRightPanelMode('chat'); }}
+        messagesContainerRef={messagesContainerRef}
+        messagesEndRef={messagesEndRef}
+        loadingMessages={loadingMessages}
+        messages={messages}
+        agapeMemberId={agapeMemberId}
+        messageAudits={messageAudits}
+        selectedMessageId={selectedMessage?.id}
+        onSelectMessage={handleSelectMessage}
+      />
 
       {selectedChat && rightPanelMode === 'message' && selectedMessage && (
-        <div key={`msg-${selectedMessage.id}`} className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl animate-gaveta">
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/80">
-            <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
-              <ClipboardCheck className="w-5 h-5 text-blue-400" /> Auditoria da Resposta
-            </h3>
-            <button
-              onClick={() => { setSelectedMessage(null); setRightPanelMode('none'); }}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          </div>
-
-          <form onSubmit={handleSaveMessageAudit} className="space-y-5">
-            <div className="bg-slate-900/80 border border-slate-700/60 rounded-xl p-4 text-sm text-slate-300 leading-relaxed shadow-inner">
-              <span className="font-bold text-slate-100 block mb-1.5">Resposta do Ágape:</span> 
-              <span className="italic opacity-90">&quot;{renderMessageContent(selectedMessage).slice(0, 200)}...&quot;</span>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1.5">Pergunta do cliente (Contexto)</label>
-              <input
-                type="text"
-                value={msgClientQuestion}
-                onChange={(e) => setMsgClientQuestion(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Tópico</label>
-                <select
-                  value={msgTopicId}
-                  onChange={(e) => { setMsgTopicId(e.target.value); setMsgSubtopicId(''); }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer transition-all"
-                >
-                  <option value="">Selecione...</option>
-                  {topics.map((t: Topic) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-300 mb-1.5">Subtópico</label>
-                <select
-                  value={msgSubtopicId}
-                  onChange={(e) => setMsgSubtopicId(e.target.value)}
-                  disabled={!msgTopicId}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40 transition-all"
-                >
-                  <option value="">-</option>
-                  {(topics.find((t: Topic) => t.id === msgTopicId)?.subtopics || []).map((s: Subtopic) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1 pt-4 border-t border-slate-800/80">
-              <label className="block text-sm font-semibold text-slate-300 mb-2">Motivos de Falha / Observações</label>
-              
-              {failReasons.length === 0 && (
-                <span className="text-xs text-slate-500 block mb-2">Nenhum motivo configurado. Use a engrenagem no topo esquerdo para criar.</span>
-              )}
-              
-              {failReasons.map((reason) => {
-                const isChecked = msgFailReasons.includes(reason.id);
-                return (
-                  <label key={reason.id} className="flex items-start gap-3 cursor-pointer group p-3 -mx-3 rounded-xl hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700/50">
-                    <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleMsgFailReason(reason.id)} />
-                    <div className={`mt-0.5 w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
-                      {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                    </div>
-                    <span className={`text-sm leading-snug transition-colors select-none ${isChecked ? 'text-slate-100 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                      {reason.name}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-slate-300 mb-1.5">Observações do Auditor (Opcional)</label>
-              <textarea
-                value={msgFeedback}
-                onChange={(e) => setMsgFeedback(e.target.value)}
-                rows={3}
-                placeholder="Detalhe o que o Ágape fez de errado nesta resposta..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder-slate-500 custom-scrollbar"
-              />
-            </div>
-
-            <div className="pt-4 border-t border-slate-800/80">
-              <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-blue-400 hover:text-blue-300 transition-colors mb-3">
-                <input
-                  type="checkbox"
-                  checked={msgTrainAi}
-                  onChange={(e) => setMsgTrainAi(e.target.checked)}
-                  className="w-4 h-4 rounded bg-slate-800 border-slate-600 text-blue-600 cursor-pointer"
-                />
-                <RefreshCw className="w-4 h-4" /> Enviar Q&A para Treinar o Ágape
-              </label>
-
-              {msgTrainAi && (
-                <div className="space-y-4 bg-slate-900/80 p-4 rounded-xl border border-slate-700/80 transition-all shadow-inner">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Módulo / TXT de Destino</label>
-                    <select
-                      value={msgTargetModule}
-                      onChange={(e) => setMsgTargetModule(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 outline-none focus:border-blue-500 cursor-pointer"
-                    >
-                      <option value="">Selecione o arquivo .txt...</option>
-                      {availableModules.map((mod, idx) => (
-                        <option key={idx} value={mod}>{mod}</option>
-                      ))}
-                      {availableModules.length === 0 && (
-                        <>
-                          <option value="Módulo 1: Cadastros">Módulo 1: Cadastros</option>
-                          <option value="Módulo 4: Financeiro">Módulo 4: Financeiro</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Pergunta de Treino</label>
-                    <input
-                      type="text"
-                      value={msgQaQuestion}
-                      onChange={(e) => setMsgQaQuestion(e.target.value)}
-                      placeholder="Ex: Como faço para emitir carteirinha?"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-100 outline-none focus:border-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Resposta Ideal Esperada</label>
-                    <textarea
-                      value={msgQaAnswer}
-                      onChange={(e) => setMsgQaAnswer(e.target.value)}
-                      rows={3}
-                      placeholder="Ex: Acesse Cadastros > Carteirinhas e clique em Emitir..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-100 outline-none focus:border-blue-500 custom-scrollbar"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98] active:translate-y-0 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-all duration-300 ease-out cursor-pointer mt-2"
-            >
-              <Send className="w-4 h-4" /> Salvar Auditoria da Resposta
-            </button>
-          </form>
-        </div>
+        <MessageAuditPanel
+          key={`msg-${selectedMessage.id}`}
+          selectedMessage={selectedMessage}
+          topics={topics}
+          failReasons={failReasons}
+          availableModules={availableModules}
+          onClose={() => { setSelectedMessage(null); setRightPanelMode('none'); }}
+          onSubmit={handleSaveMessageAudit}
+          msgClientQuestion={msgClientQuestion} setMsgClientQuestion={setMsgClientQuestion}
+          msgTopicId={msgTopicId} setMsgTopicId={setMsgTopicId}
+          msgSubtopicId={msgSubtopicId} setMsgSubtopicId={setMsgSubtopicId}
+          msgFailReasons={msgFailReasons} toggleMsgFailReason={toggleMsgFailReason}
+          msgFeedback={msgFeedback} setMsgFeedback={setMsgFeedback}
+          msgTrainAi={msgTrainAi} setMsgTrainAi={setMsgTrainAi}
+          msgTargetModule={msgTargetModule} setMsgTargetModule={setMsgTargetModule}
+          msgQaQuestion={msgQaQuestion} setMsgQaQuestion={setMsgQaQuestion}
+          msgQaAnswer={msgQaAnswer} setMsgQaAnswer={setMsgQaAnswer}
+        />
       )}
 
       {selectedChat && rightPanelMode === 'chat' && (
-        <div key={`chat-${selectedChat.id}`} className="w-[22rem] 2xl:w-96 bg-slate-950 p-6 flex flex-col overflow-y-auto border-l border-slate-800/80 relative custom-scrollbar shadow-2xl animate-gaveta">
-          <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/80">
-            <h3 className="text-base font-bold flex items-center gap-2 text-slate-100">
-              <BookOpen className="w-5 h-5 text-blue-400" /> Auditoria do Atendimento
-            </h3>
-
-            <button
-              onClick={() => setRightPanelMode('none')}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          <p className="text-xs text-slate-400 mb-6 leading-relaxed bg-slate-900/50 p-3.5 rounded-xl border border-slate-800 font-medium">
-            Nota geral do atendimento. Pra auditar respostas específicas do Ágape em detalhe (tópico, falha na base, treino), clique na bolha da resposta na conversa.
-          </p>
-
-          <form onSubmit={handleSaveAudit} className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-300 mb-3 text-center">
-                Classificação Geral do Atendimento
-              </label>
-              
-              <div className="flex gap-2 bg-slate-900/80 p-3 rounded-xl border border-slate-700/80 justify-around shadow-inner">
-                {[1, 2, 3, 4, 5].map((star) => {
-                  const isActive = star <= rating;
-                  const colors = getRatingColor(rating);
-                  
-                  return (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setRating(rating === star ? 0 : star)}
-                      className={`p-1.5 focus:outline-none hover:scale-125 active:scale-75 transition-all duration-300 ease-out cursor-pointer ${isActive ? 'scale-110' : 'scale-100'}`}
-                    >
-                      <Star className={`w-8 h-8 transition-colors duration-300 ${isActive ? `${colors.fill} ${colors.text}` : 'text-slate-700 hover:text-slate-500'}`} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-800/80">
-              <div>
-                <label className="block text-sm font-bold text-slate-300 mb-1.5">Tópico</label>
-                <select
-                  value={generalTopicId}
-                  onChange={(e) => { setGeneralTopicId(e.target.value); setGeneralSubtopicId(''); }}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer transition-all"
-                >
-                  <option value="">Selecione...</option>
-                  {topics.map((t: Topic) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-300 mb-1.5">Subtópico</label>
-                <select
-                  value={generalSubtopicId}
-                  onChange={(e) => setGeneralSubtopicId(e.target.value)}
-                  disabled={!generalTopicId}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-slate-100 outline-none focus:border-blue-500 cursor-pointer disabled:opacity-40 transition-all"
-                >
-                  <option value="">-</option>
-                  {(topics.find((t: Topic) => t.id === generalTopicId)?.subtopics || []).map((s: Subtopic) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1 pt-4 border-t border-slate-800/80">
-              <label className="block text-sm font-bold text-slate-300 mb-2">Motivos de Falha na Conversa</label>
-              
-              {failReasons.length === 0 && (
-                <span className="text-xs text-slate-500 block mb-2">Nenhum motivo configurado. Use a engrenagem no topo esquerdo para criar.</span>
-              )}
-
-              {failReasons.map((reason) => {
-                const isChecked = generalFailReasons.includes(reason.id);
-                return (
-                  <label key={reason.id} className="flex items-start gap-3 cursor-pointer group p-3 -mx-3 rounded-xl hover:bg-slate-800/50 transition-all border border-transparent hover:border-slate-700/50">
-                    <input type="checkbox" className="hidden" checked={isChecked} onChange={() => toggleGeneralFailReason(reason.id)} />
-                    <div className={`mt-0.5 w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-all ${isChecked ? 'bg-blue-600 border-blue-600' : 'bg-slate-900 border-slate-600 group-hover:border-slate-500'}`}>
-                      {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-                    </div>
-                    <span className={`text-sm leading-snug transition-colors select-none ${isChecked ? 'text-slate-100 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                      {reason.name}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-slate-300 mb-2">
-                Observações Gerais do Auditor
-              </label>
-              <textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                rows={4}
-                placeholder="Resumo do atendimento como um todo..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-sm text-slate-100 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder-slate-500 custom-scrollbar font-medium"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98] active:translate-y-0 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-all duration-300 ease-out cursor-pointer mt-4"
-            >
-              <Send className="w-4 h-4" /> Salvar Auditoria Geral
-            </button>
-          </form>
-        </div>
+        <ChatAuditPanel
+          key={`chat-${selectedChat.id}`}
+          topics={topics}
+          failReasons={failReasons}
+          onClose={() => setRightPanelMode('none')}
+          onSubmit={handleSaveAudit}
+          rating={rating} setRating={setRating}
+          generalTopicId={generalTopicId} setGeneralTopicId={setGeneralTopicId}
+          generalSubtopicId={generalSubtopicId} setGeneralSubtopicId={setGeneralSubtopicId}
+          generalFailReasons={generalFailReasons} toggleGeneralFailReason={toggleGeneralFailReason}
+          feedback={feedback} setFeedback={setFeedback}
+        />
       )}
 
-      {/* --- MODAL DE CONFIGURAÇÕES: TEMAS E MOTIVOS --- */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-slate-950 border border-slate-700 rounded-3xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between p-5 border-b border-slate-800">
-              <h3 className="text-base font-black flex items-center gap-2 text-slate-100">
-                <Settings className="w-5 h-5 text-blue-400" /> Configurações Gerais
-              </h3>
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 active:scale-90 transition-all duration-200 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="flex bg-slate-900 border-b border-slate-800 p-2">
-              <button 
-                onClick={() => setSettingsTab('topics')} 
-                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl active:scale-95 transition-all duration-200 cursor-pointer ${settingsTab === 'topics' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
-              >
-                <Tag className="w-4 h-4 inline-block mr-1.5" /> Temas e Subtópicos
-              </button>
-              <button 
-                onClick={() => setSettingsTab('reasons')} 
-                className={`flex-1 py-2 text-xs font-bold text-center rounded-xl active:scale-95 transition-all duration-200 cursor-pointer ${settingsTab === 'reasons' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'}`}
-              >
-                <ListX className="w-4 h-4 inline-block mr-1.5" /> Motivos de Erro
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
-              {settingsTab === 'topics' && (
-                <>
-                  {topics.map((t: Topic) => (
-                    <div key={t.id} className="bg-slate-900/60 border border-slate-700/60 rounded-2xl p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        {editingTopicId === t.id ? (
-                          <input autoFocus value={editingTopicName} onChange={(e) => setEditingTopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameTopic(t.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-slate-100 outline-none focus:border-blue-500" />
-                        ) : (
-                          <span className="text-sm font-bold text-slate-200">{t.name}</span>
-                        )}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button onClick={() => setAddingSubtopicTo(addingSubtopicTo === t.id ? null : t.id)} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
-                          {editingTopicId === t.id ? (
-                            <button onClick={() => handleRenameTopic(t.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"><CheckSquare className="w-4 h-4" /></button>
-                          ) : (
-                            <button onClick={() => { setEditingTopicId(t.id); setEditingTopicName(t.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Pencil className="w-4 h-4" /></button>
-                          )}
-                          <button onClick={() => handleDeleteTopic(t.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
-                        </div>
-                      </div>
-
-                      {(t.subtopics || []).length > 0 && (
-                        <div className="mt-3 pl-4 border-l-2 border-slate-800 space-y-2">
-                          {t.subtopics?.map((s: Subtopic) => (
-                            <div key={s.id} className="flex items-center justify-between gap-3">
-                              {editingSubtopicId === s.id ? (
-                                <input autoFocus value={editingSubtopicName} onChange={(e) => setEditingSubtopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameSubtopic(s.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-md p-1.5 text-xs font-bold text-slate-200 outline-none focus:border-blue-500" />
-                              ) : (
-                                <span className="text-xs font-bold text-slate-400">{s.name}</span>
-                              )}
-                              <div className="flex items-center gap-1 shrink-0">
-                                {editingSubtopicId === s.id ? (
-                                  <button onClick={() => handleRenameSubtopic(s.id)} className="p-1 text-emerald-400 hover:bg-slate-800 rounded-md cursor-pointer"><CheckSquare className="w-3.5 h-3.5" /></button>
-                                ) : (
-                                  <button onClick={() => { setEditingSubtopicId(s.id); setEditingSubtopicName(s.name); }} className="p-1 text-slate-500 hover:text-blue-300 hover:bg-slate-800 rounded-md cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
-                                )}
-                                <button onClick={() => handleDeleteSubtopic(s.id)} className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-md cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {addingSubtopicTo === t.id && (
-                        <div className="mt-3 pl-4 flex items-center gap-2">
-                          <input autoFocus value={newSubtopicName} onChange={(e) => setNewSubtopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic(t.id)} placeholder="Nome do subtópico" className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-200 outline-none focus:border-blue-500" />
-                          <button onClick={() => handleAddSubtopic(t.id)} className="p-1.5 text-blue-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Plus className="w-4 h-4" /></button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {settingsTab === 'reasons' && (
-                <>
-                  <p className="text-xs text-slate-400 mb-2">Crie as opções de erro que os auditores poderão marcar durante a avaliação de uma resposta ou do chat inteiro.</p>
-                  {failReasons.map((r: FailReason) => (
-                    <div key={r.id} className="bg-slate-900/60 border border-slate-700/60 rounded-xl p-3 flex items-center justify-between gap-3">
-                      {editingReasonId === r.id ? (
-                        <input autoFocus value={editingReasonName} onChange={(e) => setEditingReasonName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleRenameReason(r.id)} className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm font-bold text-slate-100 outline-none focus:border-blue-500" />
-                      ) : (
-                        <span className="text-sm font-bold text-slate-200">{r.name}</span>
-                      )}
-                      <div className="flex items-center gap-1 shrink-0">
-                        {editingReasonId === r.id ? (
-                          <button onClick={() => handleRenameReason(r.id)} className="p-1.5 text-emerald-400 hover:bg-slate-800 rounded-lg cursor-pointer"><CheckSquare className="w-4 h-4" /></button>
-                        ) : (
-                          <button onClick={() => { setEditingReasonId(r.id); setEditingReasonName(r.name); }} className="p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-800 rounded-lg cursor-pointer"><Pencil className="w-4 h-4" /></button>
-                        )}
-                        <button onClick={() => handleDeleteReason(r.id)} className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg cursor-pointer"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-
-            <div className="p-5 border-t border-slate-800 flex items-center gap-3 bg-slate-900/50">
-              {settingsTab === 'topics' ? (
-                <>
-                  <input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()} placeholder="Adicionar novo tópico principal..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
-                  <button onClick={handleAddTopic} className="p-3 bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 active:scale-95 rounded-xl text-white cursor-pointer transition-all duration-200 shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
-                </>
-              ) : (
-                <>
-                  <input value={newReasonName} onChange={(e) => setNewReasonName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddReason()} placeholder="Novo motivo de erro..." className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500" />
-                  <button onClick={handleAddReason} className="p-3 bg-blue-600 hover:bg-blue-500 hover:-translate-y-0.5 active:scale-95 rounded-xl text-white cursor-pointer transition-all duration-200 shadow-sm shadow-blue-600/20"><Plus className="w-5 h-5" /></button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <SettingsModal
+        open={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        topics={topics}
+        failReasons={failReasons}
+        mutateTopics={mutateTopics}
+        mutateFailReasons={mutateFailReasons}
+      />
     </div>
   );
 }

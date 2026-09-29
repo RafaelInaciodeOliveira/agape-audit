@@ -7,9 +7,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { AlertTriangle, ChevronsUpDown, Clock, FileText, History, RefreshCw, Trash2, X } from 'lucide-react';
 import { buildDiffRows, type DiffLineRow } from './diffRows';
-import { apiErrorMessage } from '../lib/api';
-
-const fetcher = (url: string) => axios.get(url).then(res => res.data);
+import { apiErrorMessage, fetcher } from '../lib/api';
 
 export interface BackupSummary {
   id: string;
