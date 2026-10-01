@@ -5,18 +5,22 @@ import axios from 'axios';
 import useSWR from 'swr';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from './hooks/useAuth';
-import { API_URL, fetcher } from './lib/api';
+import { API_URL, apiErrorMessage, fetcher } from './lib/api';
 import { getCurrentUser } from './lib/auth';
 import type { Attendant, Chat, ChatFilter, FailReason, Message, MessageAudit, Topic } from './lib/types';
 import { normalizeMessages, renderMessageContent } from './lib/chatFormat';
 import { WelcomeModal } from './components/dashboard/WelcomeModal';
 import { HideChatModal } from './components/chat/HideChatModal';
+import { BulkHideChatsModal } from './components/chat/BulkHideChatsModal';
 import { ChatFiltersModal } from './components/chat/ChatFiltersModal';
 import { ChatList } from './components/chat/ChatList';
 import { ChatView } from './components/chat/ChatView';
 import { MessageAuditPanel } from './components/audit/MessageAuditPanel';
 import { ChatAuditPanel } from './components/audit/ChatAuditPanel';
 import { SettingsModal } from './components/settings/SettingsModal';
+
+// Máximo de conversas por requisição de ocultar em lote (mesmo limite do backend).
+const BULK_HIDE_LIMIT = 500;
 
 // Polling do SWR só com a aba visível e online; ao voltar para a aba, revalida na hora.
 const BACKGROUND_SAFE_POLLING = { refreshWhenHidden: false, refreshWhenOffline: false, revalidateOnFocus: true } as const;
@@ -41,6 +45,12 @@ export default function AuditDashboard() {
 
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [chatToHide, setChatToHide] = useState<Chat | null>(null);
+
+  // Seleção múltipla para ocultar várias conversas de uma vez
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedChatIds, setSelectedChatIds] = useState<string[]>([]);
+  const [showBulkHideConfirm, setShowBulkHideConfirm] = useState(false);
+  const [bulkHiding, setBulkHiding] = useState(false);
 
   const [rating, setRating] = useState(0);
   const [generalTopicId, setGeneralTopicId] = useState(''); 
@@ -224,6 +234,59 @@ export default function AuditDashboard() {
     }
   };
 
+  const exitMultiSelect = () => {
+    setIsMultiSelectMode(false);
+    setSelectedChatIds([]);
+    setShowBulkHideConfirm(false);
+  };
+
+  const toggleMultiSelect = () => {
+    if (isMultiSelectMode) exitMultiSelect();
+    else setIsMultiSelectMode(true);
+  };
+
+  const toggleChatSelection = (chat: Chat) => {
+    setSelectedChatIds(prev => (prev.includes(chat.id) ? prev.filter(id => id !== chat.id) : [...prev, chat.id]));
+  };
+
+  // Marca todas as conversas exibidas; se todas já estão marcadas, limpa a seleção.
+  const toggleSelectAllVisible = () => {
+    const visibleIds = visibleChats.map(c => c.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedChatIds.includes(id));
+    setSelectedChatIds(allSelected ? [] : Array.from(new Set([...selectedChatIds, ...visibleIds])));
+  };
+
+  const requestBulkHide = () => {
+    if (selectedChatIds.length === 0) return;
+    if (selectedChatIds.length > BULK_HIDE_LIMIT) {
+      toast.error(`Selecione no máximo ${BULK_HIDE_LIMIT} conversas por vez.`);
+      return;
+    }
+    setShowBulkHideConfirm(true);
+  };
+
+  const handleConfirmBulkHide = async () => {
+    const ids = selectedChatIds;
+    setBulkHiding(true);
+    try {
+      await axios.post(`${API_URL}/chats/bulk-hide`, { chatIds: ids });
+      toast.success(ids.length === 1 ? '1 conversa ocultada! Movida para a aba Ocultos.' : `${ids.length} conversas ocultadas! Movidas para a aba Ocultos.`);
+      if (selectedChat && ids.includes(selectedChat.id)) setSelectedChat(null);
+      exitMultiSelect();
+      mutateChats();
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Erro ao ocultar as conversas.'));
+    } finally {
+      setBulkHiding(false);
+    }
+  };
+
+  // Trocar de aba encerra a seleção (a lista exibida passa a ser outra).
+  const handleStatusTabChange = (tab: string) => {
+    if (tab !== statusTab) exitMultiSelect();
+    setStatusTab(tab);
+  };
+
   const handleUnhideChat = async () => {
     if (!selectedChat) return;
     try {
@@ -344,6 +407,15 @@ export default function AuditDashboard() {
 
       {chatToHide && <HideChatModal chat={chatToHide} onCancel={() => setChatToHide(null)} onConfirm={handleConfirmHide} />}
 
+      {showBulkHideConfirm && (
+        <BulkHideChatsModal
+          count={selectedChatIds.length}
+          hiding={bulkHiding}
+          onCancel={() => setShowBulkHideConfirm(false)}
+          onConfirm={handleConfirmBulkHide}
+        />
+      )}
+
       {showFiltersModal && (
         <ChatFiltersModal
           chatFilters={chatFilters}
@@ -359,7 +431,7 @@ export default function AuditDashboard() {
         selectedChatId={selectedChat?.id}
         onSelectChat={handleSelectChat}
         statusTab={statusTab}
-        onStatusTabChange={setStatusTab}
+        onStatusTabChange={handleStatusTabChange}
         attendants={attendants}
         activeAttendantId={activeAttendantId}
         onSelectAttendant={setSelectedAttendantId}
@@ -374,6 +446,12 @@ export default function AuditDashboard() {
         hasData={!!chatsData}
         validatingChats={validatingChats}
         onRetry={() => mutateChats()}
+        isMultiSelectMode={isMultiSelectMode}
+        onToggleMultiSelect={toggleMultiSelect}
+        selectedChatIds={selectedChatIds}
+        onToggleChatSelection={toggleChatSelection}
+        onToggleSelectAllVisible={toggleSelectAllVisible}
+        onRequestBulkHide={requestBulkHide}
       />
 
       <ChatView

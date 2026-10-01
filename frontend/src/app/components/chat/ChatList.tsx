@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element */
-import { BookOpen, Search, BarChart3, Coins, Settings, LogOut, Filter } from 'lucide-react';
+import { BookOpen, Search, BarChart3, Coins, Settings, LogOut, Filter, ListChecks, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import type { Attendant, Chat } from '../../lib/types';
 import { apiErrorMessage } from '../../lib/api';
@@ -29,14 +29,27 @@ interface Props {
   hasData: boolean;
   validatingChats: boolean;
   onRetry: () => void;
+  isMultiSelectMode: boolean;
+  onToggleMultiSelect: () => void;
+  selectedChatIds: string[];
+  onToggleChatSelection: (chat: Chat) => void;
+  onToggleSelectAllVisible: () => void;
+  onRequestBulkHide: () => void;
 }
 
 // Coluna da esquerda: navegação, abas, filtros, busca e a lista de chats.
 export function ChatList({
   visibleChats, totalChats, selectedChatId, onSelectChat, statusTab, onStatusTabChange, attendants, activeAttendantId,
   onSelectAttendant, activeFilterCount, onOpenFilters, onOpenSettings, searchTerm, onSearchChange, onScroll, loadingChats,
-  chatsError, hasData, validatingChats, onRetry,
+  chatsError, hasData, validatingChats, onRetry, isMultiSelectMode, onToggleMultiSelect, selectedChatIds,
+  onToggleChatSelection, onToggleSelectAllVisible, onRequestBulkHide,
 }: Props) {
+  const selectedSet = new Set(selectedChatIds);
+  const selectedCount = selectedChatIds.length;
+  const allVisibleSelected = visibleChats.length > 0 && visibleChats.every((c) => selectedSet.has(c.id));
+  // Na aba Ocultos não faz sentido ocultar de novo.
+  const canMultiSelect = statusTab !== 'ocultos';
+
   return (
     <div className="w-[22rem] 2xl:w-96 border-r border-slate-800/80 flex flex-col bg-slate-950/60 backdrop-blur-md">
 
@@ -125,6 +138,21 @@ export function ChatList({
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-slate-950"></span>
             )}
           </button>
+
+          {canMultiSelect && (
+            <button
+              onClick={onToggleMultiSelect}
+              title={isMultiSelectMode ? 'Sair da seleção múltipla' : 'Selecionar várias conversas'}
+              aria-pressed={isMultiSelectMode}
+              className={`p-2.5 rounded-xl border flex items-center justify-center active:scale-90 transition-all duration-200 cursor-pointer shrink-0 ${
+                isMultiSelectMode
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-blue-300 hover:border-blue-500/40'
+              }`}
+            >
+              <ListChecks className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         <div className="relative group">
@@ -137,6 +165,38 @@ export function ChatList({
             className="w-full bg-slate-900/90 border border-slate-800 rounded-xl pl-10 pr-3 py-2 text-sm text-slate-200 placeholder-slate-500 outline-none focus:border-blue-500/60 transition-all"
           />
         </div>
+
+        {isMultiSelectMode && (
+          <div role="region" aria-label="Seleção múltipla" className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 space-y-2.5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-amber-300">
+                {selectedCount === 0 ? 'Selecione as conversas' : selectedCount === 1 ? '1 conversa selecionada' : `${selectedCount} conversas selecionadas`}
+              </span>
+              <button
+                onClick={onToggleSelectAllVisible}
+                disabled={visibleChats.length === 0}
+                className="text-[11px] font-semibold text-amber-200/80 hover:text-amber-100 hover:underline underline-offset-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {allVisibleSelected ? 'Limpar seleção' : 'Selecionar visíveis'}
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onToggleMultiSelect}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 text-xs font-bold transition-all duration-200 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={onRequestBulkHide}
+                disabled={selectedCount === 0}
+                className="flex-1 flex items-center justify-center gap-1.5 whitespace-nowrap py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-amber-600/20 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+              >
+                <EyeOff className="w-3.5 h-3.5" /> Ocultar Selecionadas
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div 
@@ -170,7 +230,15 @@ export function ChatList({
           </div>
         ) : (
           visibleChats.map((chat: Chat) => (
-            <ChatListItem key={chat.id} chat={chat} selected={selectedChatId === chat.id} onSelect={onSelectChat} />
+            <ChatListItem
+              key={chat.id}
+              chat={chat}
+              selected={selectedChatId === chat.id}
+              onSelect={onSelectChat}
+              selectionMode={isMultiSelectMode}
+              checked={selectedSet.has(chat.id)}
+              onToggleCheck={onToggleChatSelection}
+            />
           ))
         )}
       </div>

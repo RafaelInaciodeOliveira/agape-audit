@@ -1,9 +1,19 @@
 /* eslint-disable @next/next/no-img-element */
-import { Star, Clock, Activity } from 'lucide-react';
+import { Star, Clock, Activity, Check } from 'lucide-react';
 import type { Chat } from '../../lib/types';
 import { formatDateTime, formatRelativeTime, getRatingColor, getTagBadge, renderMessageContent } from '../../lib/chatFormat';
 
-export function ChatListItem({ chat, selected, onSelect }: { chat: Chat; selected: boolean; onSelect: (chat: Chat) => void }) {
+interface Props {
+  chat: Chat;
+  selected: boolean;
+  onSelect: (chat: Chat) => void;
+  /** Modo de seleção múltipla: o clique marca/desmarca em vez de abrir o chat. */
+  selectionMode?: boolean;
+  checked?: boolean;
+  onToggleCheck?: (chat: Chat) => void;
+}
+
+export function ChatListItem({ chat, selected, onSelect, selectionMode = false, checked = false, onToggleCheck }: Props) {
   const { dateStr, timeStr } = formatDateTime(chat.updatedAt);
   const relativeTime = formatRelativeTime(chat.updatedAt);
   const carteiraBadge = getTagBadge(chat.carteiraTag);
@@ -13,9 +23,13 @@ export function ChatListItem({ chat, selected, onSelect }: { chat: Chat; selecte
 
   return (
     <div
-      onClick={() => onSelect(chat)}
+      onClick={() => (selectionMode ? onToggleCheck?.(chat) : onSelect(chat))}
+      role={selectionMode ? 'checkbox' : undefined}
+      aria-checked={selectionMode ? checked : undefined}
       className={`group p-4 mb-1 rounded-xl cursor-pointer hover:bg-slate-900/80 hover:shadow-lg hover:shadow-black/20 hover:scale-[1.015] active:scale-[0.99] transition-all duration-300 ease-out relative overflow-hidden ${
-        selected 
+        selectionMode && checked
+          ? 'bg-amber-500/5 border border-amber-500/40 shadow-md ring-1 ring-amber-500/20'
+          : selected && !selectionMode
           ? 'bg-slate-900/90 border border-blue-500/50 shadow-md ring-1 ring-blue-500/20' 
           : 'border border-transparent'
       }`}
@@ -25,6 +39,11 @@ export function ChatListItem({ chat, selected, onSelect }: { chat: Chat; selecte
 
       <div className="flex justify-between items-center mb-2 gap-3 relative z-10">
         <span className="flex items-center gap-3 min-w-0">
+          {selectionMode && (
+            <span className={`w-4 h-4 shrink-0 rounded border flex items-center justify-center transition-all ${checked ? 'bg-amber-500 border-amber-500' : 'bg-slate-950 border-slate-600 group-hover:border-slate-500'}`}>
+              {checked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+            </span>
+          )}
           {chat.contactPhoto ? (
             <img src={chat.contactPhoto} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-700" />
           ) : (

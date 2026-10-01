@@ -47,6 +47,12 @@ export const chatsQuerySchema = z.object({
   search: text(200).optional(),
 });
 
+// Ocultar em lote: ids únicos, no máximo 500 por requisição.
+export const bulkHideBodySchema = z.object({
+  chatIds: z.array(idSchema).min(1, 'Selecione ao menos uma conversa.').max(500, 'No máximo 500 conversas por vez.')
+    .transform((ids) => [...new Set(ids)]),
+});
+
 const failReasonsSchema = z.array(idSchema).max(50).optional();
 
 export const chatAuditBodySchema = z.object({
