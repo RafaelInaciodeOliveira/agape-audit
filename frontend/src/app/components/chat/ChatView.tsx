@@ -1,9 +1,10 @@
 /* eslint-disable @next/next/no-img-element */
 import { Star, ShieldCheck, Activity, Pencil, EyeOff, Eye } from 'lucide-react';
 import type { RefObject } from 'react';
-import type { Chat, Message, MessageAudit } from '../../lib/types';
+import { isTimelineEvent, type Chat, type Message, type MessageAudit, type TimelineEntry } from '../../lib/types';
 import { getTagBadge } from '../../lib/chatFormat';
 import { MessageBubble } from './MessageBubble';
+import { TimelineEventRow } from './TimelineEventRow';
 
 interface Props {
   selectedChat: Chat | null;
@@ -14,7 +15,8 @@ interface Props {
   messagesContainerRef: RefObject<HTMLDivElement | null>;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   loadingMessages: boolean;
-  messages: Message[];
+  /** Mensagens e eventos de sistema (transferências, finalização...) em ordem cronológica. */
+  messages: TimelineEntry[];
   agapeMemberId: string | null;
   messageAudits: Record<string, MessageAudit>;
   selectedMessageId?: string;
@@ -140,9 +142,13 @@ export function ChatView({
                 </p>
               </div>
             ) : (
-              messages.map((m: Message, i: number) => (
-                <MessageBubble key={i} m={m} i={i} agapeMemberId={agapeMemberId} auditedMessage={messageAudits[m.id]} selected={selectedMessageId === m.id} onSelect={onSelectMessage} />
-              ))
+              messages.map((m: TimelineEntry, i: number) =>
+                isTimelineEvent(m) ? (
+                  <TimelineEventRow key={i} event={m} />
+                ) : (
+                  <MessageBubble key={i} m={m} i={i} agapeMemberId={agapeMemberId} auditedMessage={messageAudits[m.id]} selected={selectedMessageId === m.id} onSelect={onSelectMessage} />
+                )
+              )
             )}
             {/* Ref para o final da tela */}
             <div ref={messagesEndRef} className="h-1" />

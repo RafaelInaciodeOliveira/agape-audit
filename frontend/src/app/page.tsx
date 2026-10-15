@@ -7,7 +7,7 @@ import { Toaster, toast } from 'sonner';
 import { useAuth } from './hooks/useAuth';
 import { API_URL, apiErrorMessage, fetcher } from './lib/api';
 import { getCurrentUser } from './lib/auth';
-import type { Attendant, Chat, ChatFilter, FailReason, Message, MessageAudit, Topic } from './lib/types';
+import { isTimelineEvent, type Attendant, type Chat, type ChatFilter, type FailReason, type Message, type MessageAudit, type Topic } from './lib/types';
 import { normalizeMessages, renderMessageContent } from './lib/chatFormat';
 import { WelcomeModal } from './components/dashboard/WelcomeModal';
 import { HideChatModal } from './components/chat/HideChatModal';
@@ -333,7 +333,8 @@ export default function AuditDashboard() {
 
   const findPrecedingClientQuestion = (index: number) => {
     for (let i = index - 1; i >= 0; i--) {
-      if (messages[i]?.source === 'Contact') return renderMessageContent(messages[i]);
+      const m = messages[i];
+      if (m && !isTimelineEvent(m) && m.source === 'Contact') return renderMessageContent(m);
     }
     return '';
   };

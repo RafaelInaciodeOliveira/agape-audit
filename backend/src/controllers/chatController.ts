@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { getDb } from '../config/db.js';
 import { UmblerService } from '../services/umbler.js';
 import { getCachedChats } from '../services/chatCache.js';
+import { enrichTimelineEvents } from '../services/timelineEvents.js';
 import { sendError } from '../utils/httpErrors.js';
 import { parseInput, chatsQuerySchema, bulkHideBodySchema } from '../validation/schemas.js';
 import { getAgapeMemberId, getCarteiras, hasAgapeInteracted, isAgapeBotName, resolveCarteira } from '../services/businessConfig.js';
@@ -163,7 +164,7 @@ export async function unhideChat(req: Request, res: Response) {
 export async function getChatMessages(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const messages = await UmblerService.getChatMessages(id);
+    const messages = await enrichTimelineEvents(await UmblerService.getChatMessages(id));
     res.json(messages);
   } catch (error) { sendError(res, error, 'GET /api/chats/:id/messages'); }
 }

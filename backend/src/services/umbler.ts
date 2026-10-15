@@ -194,9 +194,30 @@ export const UmblerService = {
     return result;
   },
 
+  // Setores da organização, usados para dar nome às transferências de setor da timeline.
+  listSectors: async (): Promise<Array<{ id: string; name: string }>> => {
+    const response = await umblerApi.get('/v1/sectors/', { params: { organizationId } });
+    const data = response.data;
+    return Array.isArray(data) ? data : data?.items ?? [];
+  },
+
+  // Etiquetas da organização (paginadas), para dar nome às mudanças de etiqueta da timeline.
+  // Diferente de getTags, lança erro: quem chama decide o fallback.
+  listTags: async (): Promise<Array<{ id: string; name: string }>> => {
+    const items: any[] = [];
+    for (let skip = 0; ; skip += CHAT_PAGE_SIZE) {
+      const response = await umblerApi.get('/v1/tags/', { params: { organizationId, Skip: skip, Take: CHAT_PAGE_SIZE } });
+      const page: any[] = Array.isArray(response.data) ? response.data : response.data?.items ?? [];
+      items.push(...page);
+      if (page.length < CHAT_PAGE_SIZE || Array.isArray(response.data)) return items;
+    }
+  },
+
+  // Timeline do chat: mensagens + eventos de sistema (transferências, chat finalizado, chatbot
+  // iniciado...), que a Umbler só devolve com IncludeMetadata=true.
   // Em caso de falha lança UmblerError (a rota responde 502); antes devolvia [] e a tela
   // mostrava "nenhuma mensagem" num chat que tem histórico.
-  getChatMessages: async (chatId: string) => fetchChatMessages(chatId, { includeMetadata: false }),
+  getChatMessages: async (chatId: string) => fetchChatMessages(chatId, { includeMetadata: true }),
 
   // Mensagens com metadados de cobrança (message.billable), usado pelo sync de custos de IA.
   // `since` (ms) interrompe a paginação ao chegar em mensagens já sincronizadas.

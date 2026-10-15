@@ -1,4 +1,4 @@
-import type { Message } from './types';
+import type { TimelineEntry } from './types';
 
 // Formatação de chats, mensagens, notas e etiquetas exibidas na tela de auditoria.
 
@@ -19,9 +19,9 @@ export function getRatingColor(rating: number | null) {
   return { text: 'text-slate-400', fill: 'fill-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/30' };
 }
 
-export function normalizeMessages(data: unknown): Message[] {
-  if (Array.isArray(data)) return data as Message[];
-  const d = data as { items?: Message[]; messages?: Message[]; data?: Message[] } | undefined;
+export function normalizeMessages(data: unknown): TimelineEntry[] {
+  if (Array.isArray(data)) return data as TimelineEntry[];
+  const d = data as { items?: TimelineEntry[]; messages?: TimelineEntry[]; data?: TimelineEntry[] } | undefined;
   return d?.items ?? d?.messages ?? d?.data ?? [];
 }
 
