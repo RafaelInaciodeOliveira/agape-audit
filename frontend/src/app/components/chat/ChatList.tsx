@@ -7,6 +7,8 @@ import { logout } from '../../lib/auth';
 import { AttendantDropdown } from './AttendantDropdown';
 import { ChatListError } from './ChatListError';
 import { ChatListItem } from './ChatListItem';
+import { NotificationBell } from './NotificationBell';
+import type { NotificationState } from '../../hooks/useChatNotifications';
 
 interface Props {
   visibleChats: Chat[];
@@ -35,6 +37,8 @@ interface Props {
   onToggleChatSelection: (chat: Chat) => void;
   onToggleSelectAllVisible: () => void;
   onRequestBulkHide: () => void;
+  notificationState: NotificationState;
+  onToggleNotifications: () => void;
 }
 
 // Coluna da esquerda: navegação, abas, filtros, busca e a lista de chats.
@@ -42,7 +46,7 @@ export function ChatList({
   visibleChats, totalChats, selectedChatId, onSelectChat, statusTab, onStatusTabChange, attendants, activeAttendantId,
   onSelectAttendant, activeFilterCount, onOpenFilters, onOpenSettings, searchTerm, onSearchChange, onScroll, loadingChats,
   chatsError, hasData, validatingChats, onRetry, isMultiSelectMode, onToggleMultiSelect, selectedChatIds,
-  onToggleChatSelection, onToggleSelectAllVisible, onRequestBulkHide,
+  onToggleChatSelection, onToggleSelectAllVisible, onRequestBulkHide, notificationState, onToggleNotifications,
 }: Props) {
   const selectedSet = new Set(selectedChatIds);
   const selectedCount = selectedChatIds.length;
@@ -153,6 +157,8 @@ export function ChatList({
               <ListChecks className="w-4 h-4" />
             </button>
           )}
+
+          <NotificationBell state={notificationState} onToggle={onToggleNotifications} />
         </div>
 
         <div className="relative group">

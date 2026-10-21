@@ -5,6 +5,7 @@ import axios from 'axios';
 import useSWR from 'swr';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from './hooks/useAuth';
+import { useChatNotifications } from './hooks/useChatNotifications';
 import { API_URL, apiErrorMessage, fetcher } from './lib/api';
 import { getCurrentUser } from './lib/auth';
 import { isTimelineEvent, type Attendant, type Chat, type ChatFilter, type FailReason, type Message, type MessageAudit, type Topic } from './lib/types';
@@ -105,6 +106,8 @@ export default function AuditDashboard() {
     ? `${API_URL}/chats?search=${debouncedSearch}&attendantId=${activeAttendantId}&status=${statusTab}` 
     : null;
     
+  const { state: notificationState, toggle: toggleNotifications } = useChatNotifications(activeAttendantId);
+
   const { data: chatsData, error: chatsError, isLoading: loadingChats, isValidating: validatingChats, mutate: mutateChats } = useSWR(
     chatQueryUrl,
     fetcher,
@@ -453,6 +456,8 @@ export default function AuditDashboard() {
         onToggleChatSelection={toggleChatSelection}
         onToggleSelectAllVisible={toggleSelectAllVisible}
         onRequestBulkHide={requestBulkHide}
+        notificationState={notificationState}
+        onToggleNotifications={toggleNotifications}
       />
 
       <ChatView
