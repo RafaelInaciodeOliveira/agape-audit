@@ -26,4 +26,25 @@ export function getCachedChats(chatState: ChatState): Promise<ChatsResult> {
 
 export function invalidateChatCache() {
   entries.clear();
+  reportEntries.clear();
+}
+
+// Relatórios: chats com atividade desde `sinceMs`, paginando a Umbler (ordem pela última
+// mensagem, desc) só até sair do período, com o teto de segurança UMBLER_MAX_CHATS.
+// Cache de 1 minuto por início de período: trocar só a data final não refaz a busca.
+const REPORT_TTL_MS = 60_000;
+const reportEntries = new Map<number, { at: number; value: Promise<ChatsResult> }>();
+
+export function getCachedChatsActiveSince(sinceMs: number): Promise<ChatsResult> {
+  const now = Date.now();
+  for (const [key, entry] of reportEntries) if (now - entry.at >= REPORT_TTL_MS) reportEntries.delete(key);
+  const hit = reportEntries.get(sinceMs);
+  if (hit) return hit.value;
+
+  const value = UmblerService.getChats({ chatState: 'All', activeSince: sinceMs });
+  reportEntries.set(sinceMs, { at: now, value });
+  value.catch(() => {
+    if (reportEntries.get(sinceMs)?.value === value) reportEntries.delete(sinceMs);
+  });
+  return value;
 }

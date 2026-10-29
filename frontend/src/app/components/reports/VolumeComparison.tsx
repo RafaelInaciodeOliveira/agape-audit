@@ -1,4 +1,4 @@
-import { Inbox, MessagesSquare, ClipboardCheck, Percent, AlertTriangle, Activity } from 'lucide-react';
+import { Inbox, MessagesSquare, ClipboardCheck, Percent, AlertTriangle, Activity, CalendarRange } from 'lucide-react';
 import { StatCard } from '../common/StatCard';
 import { formatDayBR } from '../../lib/format';
 
@@ -10,7 +10,9 @@ export interface VolumeData {
   /** Dessas, quantas têm nota geral ou ao menos uma resposta auditada. */
   audited: number;
   byDay: Array<{ day: string; generated: number; audited: number }>;
-  truncated: boolean;
+  /** O período passou do teto de segurança: só as `limit` conversas mais recentes foram analisadas. */
+  limitReached: boolean;
+  limit: number;
 }
 
 interface Props {
@@ -45,15 +47,15 @@ export function VolumeComparison({ data, loading, error }: Props) {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
-          <Activity className="w-4 h-4 animate-spin text-cyan-400" /> Contando conversas na Umbler...
-        </div>
+        <VolumeSkeleton />
       ) : error ? (
         <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm flex items-center gap-2 font-medium">
           <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
         </div>
       ) : (
         <>
+          {data?.limitReached && <LimitReachedBanner limit={data.limit} />}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard icon={Inbox} label="Total de Conversas Geradas" value={generated} accent="bg-cyan-500/10 text-cyan-400 border border-cyan-500/20" />
             <StatCard icon={ClipboardCheck} label="Conversas Auditadas" value={audited} accent="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" />
@@ -102,11 +104,6 @@ export function VolumeComparison({ data, loading, error }: Props) {
             </div>
           )}
 
-          {data?.truncated && (
-            <p className="text-[11px] text-amber-400/80 flex items-center gap-1.5">
-              <AlertTriangle className="w-3.5 h-3.5" /> A lista da Umbler atingiu o limite configurado (UMBLER_MAX_CHATS); os totais podem estar subestimados.
-            </p>
-          )}
         </>
       )}
     </div>
@@ -121,6 +118,43 @@ function ComparisonBar({ label, value, max, colorClass }: { label: string; value
         <div className={`h-full ${colorClass} transition-all duration-500`} style={{ width: `${(value / max) * 100}%` }} />
       </div>
       <span className="w-12 text-right text-xs font-mono text-slate-400">{value}</span>
+    </div>
+  );
+}
+
+// Aviso quando o período tem mais conversas do que o teto analisado de uma vez.
+function LimitReachedBanner({ limit }: { limit: number }) {
+  return (
+    <div role="status" className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3.5">
+      <CalendarRange className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+      <div className="space-y-0.5">
+        <p className="text-sm font-semibold text-amber-200">Período com volume muito grande de conversas</p>
+        <p className="text-xs text-amber-200/75 leading-relaxed">
+          Exibindo as {limit.toLocaleString('pt-BR')} conversas mais recentes do período, então os números abaixo podem ficar menores que o real.
+          Para maior precisão, selecione um intervalo de datas menor.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Placeholder enquanto a Umbler é paginada (períodos longos podem levar alguns segundos).
+function VolumeSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <Activity className="w-4 h-4 animate-spin text-cyan-400" />
+        Buscando as conversas do período na Umbler. Períodos longos podem levar alguns segundos...
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-pulse">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="h-[5.5rem] rounded-xl bg-slate-900/60 border border-slate-800/60" />
+        ))}
+      </div>
+      <div className="space-y-2.5 animate-pulse">
+        <div className="h-3.5 w-full rounded-full bg-slate-800/60" />
+        <div className="h-3.5 w-2/3 rounded-full bg-slate-800/60" />
+      </div>
     </div>
   );
 }

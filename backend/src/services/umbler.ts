@@ -41,8 +41,10 @@ export const maxChatsPerQuery = () => envInt('UMBLER_MAX_CHATS', 5000);
 export const maxMessagesPerChat = () => envInt('UMBLER_MAX_MESSAGES', 2000);
 
 export const messageTime = (m: any) => new Date(m?.createdAtUTC || m?.eventAtUTC || 0).getTime();
+// Chats sem `lastMessage` (ex: só eventos de sistema) vêm intercalados na ordem por última
+// mensagem com o `eventAtUTC` do chat; sem esse fallback valeriam 0 e encerrariam a paginação incremental.
 export const chatActivityTime = (chat: any) =>
-  new Date(chat?.lastMessage?.createdAtUTC || chat?.lastMessage?.eventAtUTC || chat?.updatedAtUTC || 0).getTime();
+  new Date(chat?.lastMessage?.createdAtUTC || chat?.lastMessage?.eventAtUTC || chat?.eventAtUTC || chat?.updatedAtUTC || 0).getTime();
 
 export interface ChatsResult {
   items: any[];
@@ -107,7 +109,11 @@ async function fetchAllChats(opts: GetChatsOptions): Promise<ChatsResult> {
       if (page.items.length === 0) break;
       items.push(...page.items);
     }
-    const fresh = items.filter((c) => !stale(c));
+    // A última página pode passar do teto: corta em maxItems e remove duplicados (a lista
+    // pode mudar entre páginas quando um chat recebe mensagem e "sobe").
+    const byId = new Map<string, any>();
+    for (const chat of items) if (chat?.id && !stale(chat) && !byId.has(chat.id)) byId.set(chat.id, chat);
+    const fresh = [...byId.values()].slice(0, maxItems);
     return { items: fresh, total, truncated: items.length >= maxItems && !stale(items[items.length - 1]) };
   }
 

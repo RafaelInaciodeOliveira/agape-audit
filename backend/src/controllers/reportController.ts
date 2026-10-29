@@ -3,8 +3,9 @@ import { getDb } from '../config/db.js';
 import { sendError } from '../utils/httpErrors.js';
 import { parseInput, reportQuerySchema } from '../validation/schemas.js';
 import { buildDateFilter, toCsvCell } from '../services/reportHelpers.js';
-import { getCachedChats } from '../services/chatCache.js';
+import { getCachedChats, getCachedChatsActiveSince } from '../services/chatCache.js';
 import { getTirarDuvidasChatIds } from '../services/chatOrigin.js';
+import { maxChatsPerQuery, type ChatsResult } from '../services/umbler.js';
 
 // Relatórios: volume, temas, qualidade, valor gerado e exportação CSV.
 
@@ -12,6 +13,8 @@ import { getTirarDuvidasChatIds } from '../services/chatOrigin.js';
 // Conversas geradas (Umbler, não só as do banco) vs. auditadas no período. "Geradas" são as
 // conversas "Tirar Dúvidas" criadas no período (mesmo universo da tela de auditoria, sem as
 // ocultas); "auditadas" são as que têm nota geral ou ao menos uma resposta auditada.
+// Com período, pagina a Umbler só até o início dele (um chat criado no período teve atividade
+// desde então); o teto UMBLER_MAX_CHATS protege memória e rate limit em períodos enormes.
 export async function getVolumeReport(req: Request, res: Response) {
   try {
     const query = parseInput(reportQuerySchema, req.query, res);
@@ -28,14 +31,16 @@ export async function getVolumeReport(req: Request, res: Response) {
     };
 
     const db = getDb();
-    const [open, closed, hiddenChatsList] = await Promise.all([
-      getCachedChats('Open'),
-      getCachedChats('Closed'),
+    const sources: Promise<ChatsResult>[] = range
+      ? [getCachedChatsActiveSince(new Date(range.$gte).getTime())]
+      : [getCachedChats('Open'), getCachedChats('Closed')];
+    const [hiddenChatsList, ...results] = await Promise.all([
       db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray(),
+      ...sources,
     ]);
     const hidden = new Set(hiddenChatsList.map((h: any) => h.chatId));
     const byId = new Map<string, any>();
-    for (const chat of [...open.items, ...closed.items]) {
+    for (const chat of results.flatMap((r) => r.items)) {
       if (chat?.id && !hidden.has(chat.id) && inPeriod(chat)) byId.set(chat.id, chat);
     }
     const received = [...byId.values()];
@@ -63,8 +68,9 @@ export async function getVolumeReport(req: Request, res: Response) {
       generated: generatedIds.length,
       audited: audited.size,
       byDay,
-      // A lista da Umbler foi cortada em UMBLER_MAX_CHATS: os totais podem estar subestimados.
-      truncated: open.truncated || closed.truncated,
+      // Teto de segurança atingido: só os `limit` chats com atividade mais recente foram analisados.
+      limitReached: results.some((r) => r.truncated),
+      limit: maxChatsPerQuery(),
     });
   } catch (error) { sendError(res, error, 'GET /api/reports/volume'); }
 }
