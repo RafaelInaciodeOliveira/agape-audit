@@ -42,7 +42,6 @@ export const loginBodySchema = z.object({
 
 export const chatsQuerySchema = z.object({
   status: z.enum(['abertos', 'finalizados', 'ocultos']).optional(),
-  attendantId: z.union([z.literal('TODOS'), idSchema]).optional(),
   carteira: text(60).optional(),
   search: text(200).optional(),
 });

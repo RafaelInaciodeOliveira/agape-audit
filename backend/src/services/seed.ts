@@ -18,6 +18,7 @@ export async function initDb() {
   const db = getDb();
   await db.collection('audits').createIndex({ chatId: 1 }, { unique: true });
   await db.collection('messageAudits').createIndex({ chatId: 1, messageId: 1 }, { unique: true });
+  await db.collection('chatOrigins').createIndex({ chatId: 1 }, { unique: true });
 
   const existingTopics = await db.collection('topics').countDocuments();
   if (existingTopics === 0) {

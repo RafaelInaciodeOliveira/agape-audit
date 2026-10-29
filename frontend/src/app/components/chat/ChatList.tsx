@@ -1,10 +1,9 @@
 /* eslint-disable @next/next/no-img-element */
-import { BookOpen, Search, BarChart3, Coins, Settings, LogOut, Filter, ListChecks, EyeOff } from 'lucide-react';
+import { BookOpen, Search, BarChart3, Coins, Settings, LogOut, Filter, ListChecks, EyeOff, Bot } from 'lucide-react';
 import Link from 'next/link';
-import type { Attendant, Chat } from '../../lib/types';
+import type { Chat } from '../../lib/types';
 import { apiErrorMessage } from '../../lib/api';
 import { logout } from '../../lib/auth';
-import { AttendantDropdown } from './AttendantDropdown';
 import { ChatListError } from './ChatListError';
 import { ChatListItem } from './ChatListItem';
 import { NotificationBell } from './NotificationBell';
@@ -17,9 +16,6 @@ interface Props {
   onSelectChat: (chat: Chat) => void;
   statusTab: string;
   onStatusTabChange: (tab: string) => void;
-  attendants: Attendant[];
-  activeAttendantId: string;
-  onSelectAttendant: (attendantId: string) => void;
   activeFilterCount: number;
   onOpenFilters: () => void;
   onOpenSettings: () => void;
@@ -43,8 +39,8 @@ interface Props {
 
 // Coluna da esquerda: navegação, abas, filtros, busca e a lista de chats.
 export function ChatList({
-  visibleChats, totalChats, selectedChatId, onSelectChat, statusTab, onStatusTabChange, attendants, activeAttendantId,
-  onSelectAttendant, activeFilterCount, onOpenFilters, onOpenSettings, searchTerm, onSearchChange, onScroll, loadingChats,
+  visibleChats, totalChats, selectedChatId, onSelectChat, statusTab, onStatusTabChange,
+  activeFilterCount, onOpenFilters, onOpenSettings, searchTerm, onSearchChange, onScroll, loadingChats,
   chatsError, hasData, validatingChats, onRetry, isMultiSelectMode, onToggleMultiSelect, selectedChatIds,
   onToggleChatSelection, onToggleSelectAllVisible, onRequestBulkHide, notificationState, onToggleNotifications,
 }: Props) {
@@ -126,7 +122,14 @@ export function ChatList({
 
         <div className="flex items-center gap-2">
 
-          <AttendantDropdown attendants={attendants} activeAttendantId={activeAttendantId} onSelect={onSelectAttendant} />
+          {/* Escopo fixo: só o Ágape, nas conversas iniciadas pela opção "Tirar Dúvidas". */}
+          <div
+            title="Exibindo apenas conversas do Ágape iniciadas pela opção Tirar Dúvidas"
+            className="flex-1 min-w-0 flex items-center gap-2 bg-blue-600/10 border border-blue-500/30 rounded-xl px-3 py-2.5"
+          >
+            <Bot className="w-4 h-4 text-blue-400 shrink-0" />
+            <span className="text-sm font-semibold text-blue-300 truncate">Ágape (IA)</span>
+          </div>
 
           <button 
             onClick={onOpenFilters} 

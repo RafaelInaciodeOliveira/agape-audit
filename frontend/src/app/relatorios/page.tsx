@@ -5,9 +5,10 @@ import axios from 'axios';
 import Link from 'next/link';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '../hooks/useAuth';
-import { API_URL, downloadFile } from '../lib/api';
+import { API_URL, apiErrorMessage, downloadFile } from '../lib/api';
 import { formatDayBR } from '../lib/format';
 import { StatCard } from '../components/common/StatCard';
+import { VolumeComparison, type VolumeData } from '../components/reports/VolumeComparison';
 import {
   ArrowLeft, BarChart3, Star, Calendar,
   GraduationCap, ListChecks, FileSpreadsheet,
@@ -157,6 +158,9 @@ export default function ReportsPage() {
   const [value, setValue] = useState<ValueData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [volume, setVolume] = useState<VolumeData | null>(null);
+  const [volumeLoading, setVolumeLoading] = useState(true);
+  const [volumeError, setVolumeError] = useState<string | null>(null);
   
   const [startDate, setStartDate] = useState(getFirstDayOfMonth()); 
   const [endDate, setEndDate] = useState(getToday());
@@ -192,6 +196,26 @@ export default function ReportsPage() {
     }, 400);
 
     return () => clearTimeout(delayDebounceFn);
+  }, [isAuthorized, startDate, endDate]);
+
+  // Volume vem da Umbler (mais lento e pode falhar sozinho): carrega à parte para não
+  // travar nem derrubar os relatórios que vêm só do banco.
+  useEffect(() => {
+    if (!isAuthorized || !startDate || !endDate) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setVolumeLoading(true);
+      setVolumeError(null);
+      try {
+        const res = await axios.get<VolumeData>(`${API_URL}/reports/volume?startDate=${startDate}&endDate=${endDate}`);
+        if (!cancelled) setVolume(res.data);
+      } catch (err) {
+        if (!cancelled) setVolumeError(apiErrorMessage(err, 'Não foi possível contar as conversas na Umbler.'));
+      } finally {
+        if (!cancelled) setVolumeLoading(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [isAuthorized, startDate, endDate]);
 
   const handleExportCsv = async (reasonId?: string) => {
@@ -259,6 +283,9 @@ export default function ReportsPage() {
       </div>
 
       <div className="max-w-7xl mx-auto">
+        <div className="mb-6">
+          <VolumeComparison data={volume} loading={volumeLoading} error={volumeError} />
+        </div>
         {loading ? (
           <div className="space-y-6 w-full animate-pulse mt-4 flex flex-col items-center justify-center py-20 text-slate-500">
             <Activity className="w-10 h-10 animate-spin text-blue-500 mb-4" />
@@ -270,7 +297,6 @@ export default function ReportsPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-6 w-full">
-            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
               <StatCard icon={ListChecks} label="Mensagens Revisadas" value={quality?.totalAudited ?? 0} accent="bg-blue-500/10 text-blue-400 border border-blue-500/20" />
               <StatCard icon={CheckCircle2} label="Taxa de Conformidade (IA)" value={calculateConformity()} accent="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" />

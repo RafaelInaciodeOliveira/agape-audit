@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
-import { Star, ShieldCheck, Activity, Pencil, EyeOff, Eye } from 'lucide-react';
+import { Star, ShieldCheck, Activity, Pencil, EyeOff, Eye, UserRoundCheck } from 'lucide-react';
 import type { RefObject } from 'react';
-import { isTimelineEvent, type Chat, type Message, type MessageAudit, type TimelineEntry } from '../../lib/types';
+import { isTimelineEvent, type Chat, type Message, type MessageAudit, type TimelineEntry, type TimelineEvent } from '../../lib/types';
 import { getTagBadge } from '../../lib/chatFormat';
 import { MessageBubble } from './MessageBubble';
 import { TimelineEventRow } from './TimelineEventRow';
@@ -17,6 +17,10 @@ interface Props {
   loadingMessages: boolean;
   /** Mensagens e eventos de sistema (transferências, finalização...) em ordem cronológica. */
   messages: TimelineEntry[];
+  /** Transferência do Ágape para um especialista: a conversa exibida termina nela. */
+  specialistTransfer: TimelineEvent | null;
+  /** Mensagens e eventos posteriores à transferência, fora da auditoria. */
+  omittedAfterTransfer: number;
   agapeMemberId: string | null;
   messageAudits: Record<string, MessageAudit>;
   selectedMessageId?: string;
@@ -26,7 +30,7 @@ interface Props {
 // Coluna central: cabeçalho do chat selecionado e a conversa (ou a tela inicial vazia).
 export function ChatView({
   selectedChat, statusTab, onUnhide, onRequestHide, onOpenChatAudit, messagesContainerRef, messagesEndRef,
-  loadingMessages, messages, agapeMemberId, messageAudits, selectedMessageId, onSelectMessage,
+  loadingMessages, messages, specialistTransfer, omittedAfterTransfer, agapeMemberId, messageAudits, selectedMessageId, onSelectMessage,
 }: Props) {
   return (
     <div className="flex-1 flex flex-col bg-slate-900/40 relative">
@@ -150,6 +154,9 @@ export function ChatView({
                 )
               )
             )}
+            {!loadingMessages && specialistTransfer && (
+              <AuditCutoffNotice transfer={specialistTransfer} omittedCount={omittedAfterTransfer} />
+            )}
             {/* Ref para o final da tela */}
             <div ref={messagesEndRef} className="h-1" />
           </div>
@@ -177,6 +184,26 @@ export function ChatView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Aviso no fim da conversa quando o Ágape a transferiu para um especialista humano.
+function AuditCutoffNotice({ transfer, omittedCount }: { transfer: TimelineEvent; omittedCount: number }) {
+  const specialist = transfer.names?.newMember;
+  return (
+    <div className="mx-auto max-w-xl flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-4 py-3.5 shadow-sm">
+      <UserRoundCheck className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-amber-200">
+          A partir daqui, a conversa foi transferida para {specialist ? `o especialista ${specialist}` : 'um especialista'} e não será auditada.
+        </p>
+        <p className="text-xs text-amber-200/70">
+          {omittedCount > 0
+            ? `${omittedCount} ${omittedCount === 1 ? 'item posterior foi ocultado' : 'itens posteriores foram ocultados'} da auditoria.`
+            : 'A auditoria cobre apenas o atendimento do Ágape.'}
+        </p>
+      </div>
     </div>
   );
 }

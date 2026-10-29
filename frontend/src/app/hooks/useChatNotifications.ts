@@ -78,21 +78,21 @@ function notifyNewChats(chats: Chat[]) {
   }
 }
 
-export function useChatNotifications(attendantId: string) {
+export function useChatNotifications() {
   const state = useSyncExternalStore(subscribe, getSnapshot, () => 'unsupported' as const);
   const enabled = state === 'on';
 
   // Mesma URL da aba Entrada sem busca: o SWR deduplica com a lista quando ela está aberta.
   // Continua consultando com a aba do navegador em segundo plano, que é quando a notificação importa.
-  const url = enabled && attendantId ? `${API_URL}/chats?search=&attendantId=${attendantId}&status=abertos` : null;
+  const url = enabled ? `${API_URL}/chats?search=&status=abertos` : null;
   const { data } = useSWR<{ items?: Chat[] }>(url, fetcher, {
     refreshInterval: POLL_INTERVAL,
     refreshWhenHidden: true,
     refreshWhenOffline: false,
   });
 
-  // Ids já vistos. A primeira resposta de cada atendente só serve de base (não notifica),
-  // então recarregar a página ou trocar de atendente não dispara uma rajada.
+  // Ids já vistos. A primeira resposta só serve de base (não notifica),
+  // então recarregar a página não dispara uma rajada.
   const seenRef = useRef<{ key: string; ids: Set<string> } | null>(null);
 
   useEffect(() => {

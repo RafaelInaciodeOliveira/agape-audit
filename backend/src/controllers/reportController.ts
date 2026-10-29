@@ -3,8 +3,71 @@ import { getDb } from '../config/db.js';
 import { sendError } from '../utils/httpErrors.js';
 import { parseInput, reportQuerySchema } from '../validation/schemas.js';
 import { buildDateFilter, toCsvCell } from '../services/reportHelpers.js';
+import { getCachedChats } from '../services/chatCache.js';
+import { getTirarDuvidasChatIds } from '../services/chatOrigin.js';
 
-// Relatórios: temas, qualidade, valor gerado e exportação CSV.
+// Relatórios: volume, temas, qualidade, valor gerado e exportação CSV.
+
+// GET /api/reports/volume
+// Conversas geradas (Umbler, não só as do banco) vs. auditadas no período. "Geradas" são as
+// conversas "Tirar Dúvidas" criadas no período (mesmo universo da tela de auditoria, sem as
+// ocultas); "auditadas" são as que têm nota geral ou ao menos uma resposta auditada.
+export async function getVolumeReport(req: Request, res: Response) {
+  try {
+    const query = parseInput(reportQuerySchema, req.query, res);
+    if (!query) return;
+    const { startDate, endDate } = query;
+    const range = buildDateFilter(startDate, endDate).createdAt as { $gte: string; $lte: string } | undefined;
+    const createdIso = (chat: any) => {
+      const t = new Date(chat?.createdAtUTC ?? NaN).getTime();
+      return Number.isFinite(t) ? new Date(t).toISOString() : '';
+    };
+    const inPeriod = (chat: any) => {
+      const created = createdIso(chat);
+      return !range || (created >= range.$gte && created <= range.$lte);
+    };
+
+    const db = getDb();
+    const [open, closed, hiddenChatsList] = await Promise.all([
+      getCachedChats('Open'),
+      getCachedChats('Closed'),
+      db.collection('hiddenChats').find({}, { projection: { chatId: 1 } }).toArray(),
+    ]);
+    const hidden = new Set(hiddenChatsList.map((h: any) => h.chatId));
+    const byId = new Map<string, any>();
+    for (const chat of [...open.items, ...closed.items]) {
+      if (chat?.id && !hidden.has(chat.id) && inPeriod(chat)) byId.set(chat.id, chat);
+    }
+    const received = [...byId.values()];
+
+    const tirarDuvidasIds = await getTirarDuvidasChatIds(received);
+    const generatedIds = [...tirarDuvidasIds];
+    const [auditedChatIds, messageAuditedChatIds] = await Promise.all([
+      db.collection('audits').distinct('chatId', { chatId: { $in: generatedIds } }),
+      db.collection('messageAudits').distinct('chatId', { chatId: { $in: generatedIds } }),
+    ]);
+    const audited = new Set([...auditedChatIds, ...messageAuditedChatIds]);
+
+    const byDayMap = new Map<string, { day: string; generated: number; audited: number }>();
+    for (const id of generatedIds) {
+      const day = createdIso(byId.get(id)).slice(0, 10) || 'sem-data';
+      if (!byDayMap.has(day)) byDayMap.set(day, { day, generated: 0, audited: 0 });
+      const d = byDayMap.get(day)!;
+      d.generated += 1;
+      if (audited.has(id)) d.audited += 1;
+    }
+    const byDay = Array.from(byDayMap.values()).sort((a, b) => a.day.localeCompare(b.day));
+
+    res.json({
+      totalReceived: received.length,
+      generated: generatedIds.length,
+      audited: audited.size,
+      byDay,
+      // A lista da Umbler foi cortada em UMBLER_MAX_CHATS: os totais podem estar subestimados.
+      truncated: open.truncated || closed.truncated,
+    });
+  } catch (error) { sendError(res, error, 'GET /api/reports/volume'); }
+}
 
 // GET /api/reports/themes
 export async function getThemesReport(req: Request, res: Response) {

@@ -4,11 +4,11 @@ Ferramenta interna da Prover para auditar o atendimento do **Ágape**, o agente 
 
 ## O que dá para fazer
 
-- **Lista de chats sincronizada com a Umbler**, filtrável por atendente (com o Ágape como padrão), status (Entrada / Esperando / Finalizados) e busca por contato/assunto.
+- **Lista de chats sincronizada com a Umbler**, restrita às conversas do Ágape iniciadas pela opção "Tirar Dúvidas" do menu do chatbot, filtrável por status (Entrada / Finalizados / Ocultos) e busca por contato/assunto. A conversa exibida para na transferência do Ágape para um especialista; o que vem depois não é auditado.
 - **Auditoria geral do atendimento**: nota de 1 a 5 estrelas + observação, para o chat como um todo.
 - **Auditoria por resposta**: clique em qualquer resposta do Ágape na conversa para classificar por tópico/subtópico, marcar violação de diretriz ou falha na base de conhecimento, deixar uma observação, e opcionalmente enviar um par de pergunta/resposta ideal para treinar o agente.
 - **CRUD de Tópicos e Subtópicos**, usado para classificar as respostas auditadas.
-- **Relatórios** (`/relatorios`): volume de perguntas por tema, qualidade das respostas ao longo do tempo, e exportação em CSV de tudo que foi auditado.
+- **Relatórios** (`/relatorios`): conversas geradas na Umbler vs. auditadas no período, volume de perguntas por tema, qualidade das respostas ao longo do tempo, e exportação em CSV de tudo que foi auditado.
 
 ## Stack
 

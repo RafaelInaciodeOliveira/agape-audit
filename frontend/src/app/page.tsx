@@ -8,8 +8,9 @@ import { useAuth } from './hooks/useAuth';
 import { useChatNotifications } from './hooks/useChatNotifications';
 import { API_URL, apiErrorMessage, fetcher } from './lib/api';
 import { getCurrentUser } from './lib/auth';
-import { isTimelineEvent, type Attendant, type Chat, type ChatFilter, type FailReason, type Message, type MessageAudit, type Topic } from './lib/types';
+import { isTimelineEvent, type Chat, type ChatFilter, type FailReason, type Message, type MessageAudit, type Topic } from './lib/types';
 import { normalizeMessages, renderMessageContent } from './lib/chatFormat';
+import { cutAtSpecialistTransfer } from './lib/auditScope';
 import { WelcomeModal } from './components/dashboard/WelcomeModal';
 import { HideChatModal } from './components/chat/HideChatModal';
 import { BulkHideChatsModal } from './components/chat/BulkHideChatsModal';
@@ -36,7 +37,6 @@ export default function AuditDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   
-  const [selectedAttendantId, setSelectedAttendantId] = useState('');
   const [statusTab, setStatusTab] = useState('abertos');
   
   const [showFiltersModal, setShowFiltersModal] = useState(false);
@@ -77,9 +77,6 @@ export default function AuditDashboard() {
 
   const { data: config } = useSWR(`${API_URL}/config`, fetcher);
   const agapeMemberId = config?.agapeMemberId || null;
-  const attendants: Attendant[] = config?.attendants || [];
-
-  const activeAttendantId = selectedAttendantId || agapeMemberId || '';
 
   const { data: topics = [], mutate: mutateTopics } = useSWR<Topic[]>(`${API_URL}/topics`, fetcher);
   const { data: availableModules = [] } = useSWR<string[]>(`${API_URL}/knowledge/modules`, fetcher);
@@ -102,11 +99,10 @@ export default function AuditDashboard() {
     return () => clearTimeout(handler);
   }, [searchTerm]);
 
-  const chatQueryUrl = activeAttendantId 
-    ? `${API_URL}/chats?search=${debouncedSearch}&attendantId=${activeAttendantId}&status=${statusTab}` 
-    : null;
+  // A lista é sempre do Ágape (conversas "Tirar Dúvidas"); não há filtro por atendente.
+  const chatQueryUrl = `${API_URL}/chats?search=${encodeURIComponent(debouncedSearch)}&status=${statusTab}`;
     
-  const { state: notificationState, toggle: toggleNotifications } = useChatNotifications(activeAttendantId);
+  const { state: notificationState, toggle: toggleNotifications } = useChatNotifications();
 
   const { data: chatsData, error: chatsError, isLoading: loadingChats, isValidating: validatingChats, mutate: mutateChats } = useSWR(
     chatQueryUrl,
@@ -126,7 +122,12 @@ export default function AuditDashboard() {
   );
   // O SWR mantém a mesma referência de `data` quando nada mudou, então o efeito de
   // auto-scroll não dispara a cada polling sem mensagens novas.
-  const messages = useMemo(() => normalizeMessages(messagesData), [messagesData]);
+  // A conversa para na transferência do Ágape para um especialista: o resto não é auditado.
+  const auditScope = useMemo(
+    () => cutAtSpecialistTransfer(normalizeMessages(messagesData), agapeMemberId),
+    [messagesData, agapeMemberId]
+  );
+  const messages = auditScope.entries;
 
   const toggleFilter = (val: ChatFilter) => {
     setChatFilters(prev => 
@@ -436,9 +437,6 @@ export default function AuditDashboard() {
         onSelectChat={handleSelectChat}
         statusTab={statusTab}
         onStatusTabChange={handleStatusTabChange}
-        attendants={attendants}
-        activeAttendantId={activeAttendantId}
-        onSelectAttendant={setSelectedAttendantId}
         activeFilterCount={chatFilters.length}
         onOpenFilters={() => setShowFiltersModal(true)}
         onOpenSettings={() => setShowSettingsModal(true)}
@@ -470,6 +468,8 @@ export default function AuditDashboard() {
         messagesEndRef={messagesEndRef}
         loadingMessages={loadingMessages}
         messages={messages}
+        specialistTransfer={auditScope.transfer}
+        omittedAfterTransfer={auditScope.omittedCount}
         agapeMemberId={agapeMemberId}
         messageAudits={messageAudits}
         selectedMessageId={selectedMessage?.id}

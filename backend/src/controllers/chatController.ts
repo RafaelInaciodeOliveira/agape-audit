@@ -5,16 +5,18 @@ import { getCachedChats } from '../services/chatCache.js';
 import { enrichTimelineEvents } from '../services/timelineEvents.js';
 import { sendError } from '../utils/httpErrors.js';
 import { parseInput, chatsQuerySchema, bulkHideBodySchema } from '../validation/schemas.js';
-import { getAgapeMemberId, getCarteiras, hasAgapeInteracted, isAgapeBotName, resolveCarteira } from '../services/businessConfig.js';
+import { getTirarDuvidasChatIds } from '../services/chatOrigin.js';
+import { getAgapeMemberId, getCarteiras, hasAgapeInteracted, resolveCarteira } from '../services/businessConfig.js';
 
 // Lista de chats (Umbler + auditorias), ocultar/reexibir, mensagens e auditorias por resposta de um chat.
+// A auditoria é só do Ágape: a lista traz apenas as conversas iniciadas pela opção "Tirar Dúvidas".
 
 // GET /api/chats
 export async function listChats(req: Request, res: Response) {
   try {
     const query = parseInput(chatsQuerySchema, req.query, res);
     if (!query) return;
-    const { carteira, search, attendantId, status } = query;
+    const { carteira, search, status } = query;
     const db = getDb();
     
     const targetStatus = status ?? 'finalizados';
@@ -30,9 +32,11 @@ export async function listChats(req: Request, res: Response) {
     ]);
     const hiddenChatsSet = new Set(hiddenChatsList.map((h: any) => h.chatId));
     const truncated = results.some((r) => r.truncated);
-    const chatsToProcess = results
+    const visibleInTab = results
       .flatMap((r) => r.items)
       .filter((chat: any) => (targetStatus === 'ocultos') === hiddenChatsSet.has(chat.id));
+    const tirarDuvidasIds = await getTirarDuvidasChatIds(visibleInTab);
+    const chatsToProcess = visibleInTab.filter((chat: any) => tirarDuvidasIds.has(chat.id));
 
     // Só as auditorias dos chats retornados, indexadas por chatId (antes: coleções inteiras + find em loop).
     const chatIds = chatsToProcess.map((c: any) => c.id);
@@ -61,12 +65,6 @@ export async function listChats(req: Request, res: Response) {
 
       const chatStatus = (chat.closedAtUTC || chat.open === false) ? 'closed' : chat.waiting ? 'waiting' : 'open';
 
-      const isAgapeLastMessage =
-        lastMsgFromChat?.sentByOrganizationMember?.id === agapeId ||
-        (lastMsgFromChat?.source === 'Bot' && isAgapeBotName(lastMsgFromChat?.botInstance?.botName));
-
-      const effectiveOwnerId = isAgapeLastMessage ? agapeId : chat.organizationMember?.id;
-
       return {
         id: chat.id,
         contactName: chat.contact?.name || 'Cliente sem nome',
@@ -78,7 +76,6 @@ export async function listChats(req: Request, res: Response) {
         updatedAt: lastMsgDate,
         hasAgapeInteracted: agapeInteracted,
         chatStatus,
-        effectiveOwnerId,
         audit: audit || null,
         hasMessageAudits,
       };
@@ -97,9 +94,6 @@ export async function listChats(req: Request, res: Response) {
       return dateB - dateA;
     });
 
-    if (attendantId && attendantId !== 'TODOS') {
-      chats = chats.filter((c: any) => c.effectiveOwnerId === attendantId);
-    }
     if (carteira && carteira !== 'TODAS') {
       chats = chats.filter((c: any) => c.carteiraTag.toUpperCase().includes(carteira.toUpperCase()));
     }

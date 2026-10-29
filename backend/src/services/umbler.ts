@@ -219,6 +219,16 @@ export const UmblerService = {
   // mostrava "nenhuma mensagem" num chat que tem histórico.
   getChatMessages: async (chatId: string) => fetchChatMessages(chatId, { includeMetadata: true }),
 
+  // Primeiras mensagens a partir de um instante (ex: início de um chatbot), em ordem cronológica.
+  // Usado para ler a opção escolhida no menu do chatbot sem baixar o histórico inteiro.
+  getMessagesAfter: async (chatId: string, fromUTC: string, take = 40): Promise<any[]> => {
+    const response = await umblerApi.get(`/v1/chats/${encodeURIComponent(chatId)}/relative-messages/`, {
+      params: { organizationId, FromEventUTC: fromUTC, Take: take, Direction: 'TakeAfter', IncludeMetadata: true },
+    });
+    const data = response.data?.messages ?? response.data?.items ?? response.data;
+    return (Array.isArray(data) ? data : []).sort((a, b) => messageTime(a) - messageTime(b));
+  },
+
   // Mensagens com metadados de cobrança (message.billable), usado pelo sync de custos de IA.
   // `since` (ms) interrompe a paginação ao chegar em mensagens já sincronizadas.
   getChatMessagesWithBilling: async (chatId: string, opts: { since?: number } = {}): Promise<any[]> => {
