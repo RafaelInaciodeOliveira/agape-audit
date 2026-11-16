@@ -29,13 +29,16 @@ umblerApi.interceptors.response.use(
 // ---------- Paginação ----------
 // Lista de chats: offset (Skip/Take) com `page.totalItems`/`page.maxTake` na resposta.
 // Mensagens: cursor por data (FromEventUTC + TakeBefore), no máximo 250 por chamada.
-const CHAT_PAGE_SIZE = 250;
 const MESSAGE_PAGE_SIZE = 250; // máximo documentado da rota relative-messages
+const TAG_PAGE_SIZE = 250;
 const PAGE_CONCURRENCY = 4;
 const envInt = (name: string, fallback: number) => {
   const v = Number(process.env[name]);
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
 };
+// O tempo da Umbler na lista de chats cresce bem mais que o tamanho da página: em 16/11/2026,
+// Take=250 levava 23–48 s (estourando o timeout e derrubando /api/chats), Take=50 levava 2–4 s.
+const CHAT_PAGE_SIZE = envInt('UMBLER_CHAT_PAGE_SIZE', 50);
 // Travas de segurança contra históricos gigantes (configuráveis no .env).
 export const maxChatsPerQuery = () => envInt('UMBLER_MAX_CHATS', 5000);
 export const maxMessagesPerChat = () => envInt('UMBLER_MAX_MESSAGES', 2000);
@@ -211,11 +214,11 @@ export const UmblerService = {
   // Diferente de getTags, lança erro: quem chama decide o fallback.
   listTags: async (): Promise<Array<{ id: string; name: string }>> => {
     const items: any[] = [];
-    for (let skip = 0; ; skip += CHAT_PAGE_SIZE) {
-      const response = await umblerApi.get('/v1/tags/', { params: { organizationId, Skip: skip, Take: CHAT_PAGE_SIZE } });
+    for (let skip = 0; ; skip += TAG_PAGE_SIZE) {
+      const response = await umblerApi.get('/v1/tags/', { params: { organizationId, Skip: skip, Take: TAG_PAGE_SIZE } });
       const page: any[] = Array.isArray(response.data) ? response.data : response.data?.items ?? [];
       items.push(...page);
-      if (page.length < CHAT_PAGE_SIZE || Array.isArray(response.data)) return items;
+      if (page.length < TAG_PAGE_SIZE || Array.isArray(response.data)) return items;
     }
   },
 
